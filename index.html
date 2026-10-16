@@ -1058,6 +1058,11 @@
         <span>⚠️ <strong>Alerte Lecteur QR :</strong> Votre navigateur photo bloque le micro et la caméra. Cliquez sur "Ouvrir dans Safari / Chrome" !</span>
       </div>
 
+      <div id="host-conflict-banner" class="blocked-banner" style="display: none;">
+        <span id="host-conflict-text"></span>
+        <button id="host-conflict-retake-btn" class="success-btn small-btn" type="button" style="display: none;">▶️ Reprendre ici</button>
+      </div>
+
       <div id="notif-banner" class="notif-banner" style="display: none;">
         <span>🔔 Activez les notifications pour être alerté en direct à tout moment !</span>
         <button id="enable-notif-btn" type="button">Activer</button>
@@ -1418,7 +1423,7 @@
       // "ok" = relais TURN disponible · "none" = pas configuré · "error" = échec de récupération
       let turnStatus = "none";
       const CONNECT_TIMEOUT_MS = 25000;
-      const APP_VERSION = "2026-10-16-d";
+      const APP_VERSION = "2026-10-16-e";
       console.log("Discutons Privé · version", APP_VERSION);
 
       function hasTurnServer(list) {
@@ -1520,6 +1525,9 @@
       const reconnectBtn = $("reconnect-btn");
       const webviewWarningBanner = $("webview-warning-banner");
       const approvalBanner = $("approval-banner");
+      const hostConflictBanner = $("host-conflict-banner");
+      const hostConflictText = $("host-conflict-text");
+      const hostConflictRetakeBtn = $("host-conflict-retake-btn");
       const approveThreadBtn = $("approve-thread-btn");
       const rejectThreadBtn = $("reject-thread-btn");
 
@@ -1604,6 +1612,7 @@
       let guestAlias = "";
       let guestAccessDenied = false;
       let guestPendingNotified = false;
+      let guestHostUnavailableAt = 0;
       let activeChannelId = null;
       let autoReconnectInterval = null;
 
@@ -2214,6 +2223,10 @@
           activeLed.className = "led online";
           activeStatusLabel.textContent = "Connecté en direct P2P";
           offlineBanner.style.display = "none";
+        } else if (isGuestMode && Date.now() - guestHostUnavailableAt < 15000) {
+          activeLed.className = "led";
+          activeStatusLabel.textContent = "Hôte hors ligne";
+          offlineBanner.style.display = guestAccessDenied ? "none" : "flex";
         } else if (conn && !connectionFailureReported[activeChannelId]) {
           activeLed.className = "led ping";
           activeStatusLabel.textContent = "Connexion en cours…";
@@ -2245,6 +2258,10 @@
             }
           }
           if (d.type === "bye") otherTabs.delete(d.tabId);
+          if (d.type === "release-host" && !isGuestMode && d.hostId === hostId && d.tabId !== myTabId && peer && peer.open) {
+            console.warn("Un autre onglet reprend la réception des fils : mise en pause de celui-ci.");
+            releaseHostToOtherTab();
+          }
         };
       } catch (e) {}
       const myTabId = generateToken(6);
@@ -2306,6 +2323,8 @@
           `Navigateur : ${browser} · WebRTC : ${typeof RTCPeerConnection !== "undefined" ? "✅" : "❌ NON DISPONIBLE"}\n` +
           `Autres onglets de ce site ouverts : ${tabsText}\n` +
           `Serveur de mise en relation PeerJS : ${peer && peer.open ? "✅ connecté" : "❌ non connecté"}\n` +
+          (isGuestMode ? `Hôte joignable : ${guestHostUnavailableAt && Date.now() - guestHostUnavailableAt < 30000 ? "❌ hôte introuvable (page hôte fermée ou identifiant non enregistré)" : "✅ / en attente"}\n`
+                       : `Identifiant hôte ${hostId} : ${peer && peer.open ? "✅ enregistré" : hostIdBusySince ? "❌ OCCUPÉ par un autre onglet / appareil" : hostReleasedToOtherTab ? "⏸️ cédé à un autre onglet" : "❌ non enregistré"}\n`) +
           `Relais TURN configuré : ${turnStatus === "ok" ? "✅ oui" : turnStatus === "error" ? "❌ identifiants refusés / injoignables" : "❌ non (STUN seulement)"}\n\n` +
           `Adresse locale : ${yes(found.host)}   Adresse publique (STUN) : ${yes(found.srflx)}   Relais (TURN) : ${yes(found.relay)}\n\n` +
           verdict + "\n\n" +
@@ -2337,6 +2356,12 @@
         overlay.querySelector("#diagnostic-text").textContent = text;
         overlay.style.display = "flex";
       }
+
+      hostConflictRetakeBtn.addEventListener("click", () => {
+        try { tabChannel && tabChannel.postMessage({ type: "release-host", hostId, tabId: myTabId }); } catch (e) {}
+        setTimeout(createHostPeer, 800);
+      });
+      setInterval(() => { if (hostIdBusySince) updateHostConflictBanner(); }, 5000);
 
       document.getElementById("diagnostic-btn").addEventListener("click", e => runNetworkDiagnostic(e.currentTarget));
       document.getElementById("sidebar-diagnostic-btn").addEventListener("click", e => runNetworkDiagnostic(e.currentTarget));
@@ -2740,64 +2765,116 @@
             setTimeout(() => { if (!peer.destroyed) peer.reconnect(); }, 3000);
           });
           peer.on("error", err => {
-            if (err && err.type !== "peer-unavailable") console.error("Erreur Peer Invité:", err);
+            if (err && err.type === "peer-unavailable") {
+              guestHostUnavailableAt = Date.now();
+              if (activeChannelId) updateActiveStatusLabel();
+              return;
+            }
+            console.error("Erreur Peer Invité:", err);
           });
         } else {
-          peer = new Peer(hostId, PEER_OPTIONS);
-          peer.on("open", id => console.log("Hôte à l'écoute sur l'ID:", id));
-
-          peer.on("connection", incomingConn => {
-            const meta = incomingConn.metadata || {};
-            const chId = typeof meta.channel === "string" ? meta.channel : null;
-            if (!chId || !CHANNEL_ID_REGEX.test(chId)) {
-              rejectIncomingConnection(incomingConn, "invalid");
-              return;
-            }
-
-            let contact = myContacts.find(c => c.channelId === chId);
-
-            if (!contact && typeof meta.invite === "string") {
-              const result = createThreadFromInvite(chId, meta);
-              if (!result.ok) {
-                console.warn("Création de fil refusée:", result.reason, chId);
-                rejectIncomingConnection(incomingConn, result.reason);
-                return;
-              }
-              contact = result.contact;
-            }
-
-            if (!contact || contact.isBlocked) {
-              rejectIncomingConnection(incomingConn, contact ? "blocked" : "banned");
-              return;
-            }
-
-            // Mise à jour du pseudo choisi par l'invité (le nom donné par l'hôte est conservé)
-            if (contact.origin === "qr" && typeof meta.alias === "string") {
-              const pseudo = sanitizeAlias(meta.alias);
-              if (pseudo && pseudo !== contact.guestAlias) {
-                contact.guestAlias = pseudo;
-                saveContacts();
-              }
-            }
-
-            setupConnection(incomingConn, chId);
-          });
-
-          peer.on("call", handleIncomingCall);
-          peer.on("disconnected", () => {
-            setTimeout(() => { if (!peer.destroyed) peer.reconnect(); }, 3000);
-          });
-          peer.on("error", err => {
-            console.error("Erreur Peer Hôte:", err);
-            if (err && err.type === "unavailable-id") {
-              alert(
-                "⚠️ Votre identifiant d'hôte est déjà actif ailleurs (autre onglet ou autre appareil).\n\n" +
-                "Un seul appareil hôte peut recevoir les fils à la fois : fermez l'autre session puis rechargez cette page."
-              );
-            }
-          });
+          createHostPeer();
         }
       }
+
+      /* ---------- PAGE HÔTE : ENREGISTREMENT DE L'IDENTIFIANT (avec reprise automatique) ---------- */
+      let hostPeerRetryTimer = null;
+      let hostIdBusySince = null;
+      let hostReleasedToOtherTab = false;
+
+      function createHostPeer() {
+        clearTimeout(hostPeerRetryTimer);
+        hostReleasedToOtherTab = false;
+        if (peer && !peer.destroyed) { try { peer.destroy(); } catch (e) {} }
+        const thisPeer = new Peer(hostId, PEER_OPTIONS);
+        peer = thisPeer;
+
+        thisPeer.on("open", id => {
+          console.log("Hôte à l'écoute sur l'ID:", id);
+          hostIdBusySince = null;
+          updateHostConflictBanner();
+        });
+        thisPeer.on("connection", handleHostConnection);
+        thisPeer.on("call", handleIncomingCall);
+        thisPeer.on("disconnected", () => {
+          setTimeout(() => { if (peer === thisPeer && !thisPeer.destroyed) thisPeer.reconnect(); }, 3000);
+        });
+        thisPeer.on("error", err => {
+          console.error("Erreur Peer Hôte:", err);
+          if (err && err.type === "unavailable-id" && peer === thisPeer) onHostIdBusy();
+        });
+      }
+
+      function onHostIdBusy() {
+        if (!hostIdBusySince) hostIdBusySince = Date.now();
+        // Demande aux autres onglets (version à jour) de libérer l'identifiant
+        try { tabChannel && tabChannel.postMessage({ type: "release-host", hostId, tabId: myTabId }); } catch (e) {}
+        updateHostConflictBanner();
+        clearTimeout(hostPeerRetryTimer);
+        hostPeerRetryTimer = setTimeout(createHostPeer, 5000);
+      }
+
+      function releaseHostToOtherTab() {
+        clearTimeout(hostPeerRetryTimer);
+        if (peer && !peer.destroyed) { try { peer.destroy(); } catch (e) {} }
+        hostReleasedToOtherTab = true;
+        updateHostConflictBanner();
+      }
+
+      function updateHostConflictBanner() {
+        if (isGuestMode) { hostConflictBanner.style.display = "none"; return; }
+        if (hostReleasedToOtherTab) {
+          hostConflictText.innerHTML = "ℹ️ <strong>Cette page hôte est en pause</strong> : un autre onglet a repris la réception des fils.";
+          hostConflictRetakeBtn.style.display = "inline-block";
+          hostConflictBanner.style.display = "flex";
+        } else if (hostIdBusySince) {
+          const secs = Math.round((Date.now() - hostIdBusySince) / 1000);
+          hostConflictText.innerHTML =
+            `⚠️ <strong>Votre identifiant d'hôte est occupé</strong> (depuis ${secs} s) : les invités ne peuvent pas vous joindre. ` +
+            "Fermez les autres onglets <em>littlecontributor.github.io</em> (Chuchotons, private-chat, InPrivate…). Nouvelle tentative automatique toutes les 5 s.";
+          hostConflictRetakeBtn.style.display = "none";
+          hostConflictBanner.style.display = "flex";
+        } else {
+          hostConflictBanner.style.display = "none";
+        }
+      }
+
+      function handleHostConnection(incomingConn) {
+      const meta = incomingConn.metadata || {};
+      const chId = typeof meta.channel === "string" ? meta.channel : null;
+      if (!chId || !CHANNEL_ID_REGEX.test(chId)) {
+        rejectIncomingConnection(incomingConn, "invalid");
+        return;
+      }
+
+      let contact = myContacts.find(c => c.channelId === chId);
+
+      if (!contact && typeof meta.invite === "string") {
+        const result = createThreadFromInvite(chId, meta);
+        if (!result.ok) {
+          console.warn("Création de fil refusée:", result.reason, chId);
+          rejectIncomingConnection(incomingConn, result.reason);
+          return;
+        }
+        contact = result.contact;
+      }
+
+      if (!contact || contact.isBlocked) {
+        rejectIncomingConnection(incomingConn, contact ? "blocked" : "banned");
+        return;
+      }
+
+      // Mise à jour du pseudo choisi par l'invité (le nom donné par l'hôte est conservé)
+      if (contact.origin === "qr" && typeof meta.alias === "string") {
+        const pseudo = sanitizeAlias(meta.alias);
+        if (pseudo && pseudo !== contact.guestAlias) {
+          contact.guestAlias = pseudo;
+          saveContacts();
+        }
+      }
+
+      setupConnection(incomingConn, chId);
+    }
 
       function guestConnMetadata(channelId) {
         const meta = { channel: channelId };
@@ -2867,8 +2944,11 @@
         if (activeConnections[channelId] && activeConnections[channelId].open) return;
 
         let text;
-        if (isGuestMode) {
-          text = "⚠️ L'hôte a bien reçu votre demande, mais la connexion directe n'aboutit pas depuis votre réseau. " +
+        if (isGuestMode && Date.now() - guestHostUnavailableAt < CONNECT_TIMEOUT_MS + 10000) {
+          text = "⏳ L'hôte n'est pas en ligne pour le moment (sa page est fermée ou pas connectée). " +
+                 "Vos messages restent en attente et lui seront remis automatiquement dès qu'il sera là.";
+        } else if (isGuestMode) {
+          text = "⚠️ L'hôte est en ligne mais la connexion n'aboutit pas depuis votre réseau. " +
                  "Essayez en Wi-Fi (ou en 4G si vous êtes en Wi-Fi). Vos messages restent en attente et seront remis automatiquement.";
         } else if (turnStatus === "ok") {
           text = "⚠️ Le correspondant vous a joint mais la connexion échoue même via le relais TURN. " +
@@ -2934,6 +3014,7 @@
 
         conn.on("open", () => {
           if (activeConnections[channelId] !== conn) activeConnections[channelId] = conn;
+          guestHostUnavailableAt = 0;
           remotePeerIds[channelId] = conn.peer;
           connectionFailureReported[channelId] = false;
 
@@ -3732,5 +3813,5 @@
       initApp();
     })();
   </script>
-<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a4b62c125f9457fe',t:'MTc5MjE0NDM2MQ=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a4b6b73eaee3bb6c',t:'MTc5MjE1MDA2MQ=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>
