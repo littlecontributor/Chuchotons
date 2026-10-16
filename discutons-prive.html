@@ -1,0 +1,3345 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <meta name="theme-color" content="#0d0610" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <title>Discutons Privé · QR permanent, Vidéo WebRTC</title>
+  <!-- WebRTC simplifié via PeerJS -->
+  <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+  <!-- QRCode.js pour générer les QR codes -->
+  <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
+  <style>
+    :root {
+      --bg: #0d0610;
+      --card: rgba(28, 14, 34, 0.94);
+      --card-hover: rgba(43, 22, 53, 0.92);
+      --text: #fff7fb;
+      --muted: #d8bfd4;
+      --primary: #e11d48;
+      --primary-dark: #be123c;
+      --accent: #a855f7;
+      --success: #10b981;
+      --danger: #fb7185;
+      --warning: #f59e0b;
+      --bubble-local: linear-gradient(135deg, #e11d48, #9333ea);
+      --bubble-remote: rgba(255, 255, 255, 0.14);
+      --border: rgba(255, 182, 193, 0.18);
+      --shadow: 0 24px 70px rgba(0, 0, 0, 0.45), 0 0 50px rgba(225, 29, 72, 0.15);
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    /* ======================= DESKTOP ======================= */
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: #0d0610;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      color: var(--text);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 14px;
+      position: relative;
+    }
+
+    .app-wrapper {
+      width: min(100%, 1140px);
+      height: min(94vh, 830px);
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 28px;
+      box-shadow: var(--shadow);
+      overflow: hidden;
+      backdrop-filter: blur(20px);
+      display: flex;
+      position: relative;
+    }
+
+    /* LAYOUT HÔTE (SIDEBAR + CHAT) */
+    .sidebar {
+      width: 310px;
+      min-width: 310px;
+      background: rgba(18, 9, 23, 0.92);
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      z-index: 100;
+    }
+
+    .sidebar-header {
+      padding: 16px 14px;
+      border-bottom: 1px solid var(--border);
+    }
+    .sidebar-top-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 8px;
+    }
+    .brand-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 5px 11px;
+      border-radius: 999px;
+      color: #ffe4ec;
+      background: rgba(255, 255, 255, 0.09);
+      border: 1px solid rgba(255, 228, 236, 0.18);
+      font-weight: 700;
+      font-size: 0.74rem;
+    }
+    .sidebar-actions {
+      display: flex;
+      gap: 6px;
+    }
+    .icon-btn {
+      background: rgba(255, 255, 255, 0.14);
+      border: 1px solid rgba(255, 255, 255, 0.22);
+      color: #fff;
+      width: 34px;
+      height: 34px;
+      border-radius: 50%;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      font-size: 0.98rem;
+      padding: 0;
+      transition: all 0.2s ease;
+    }
+    .icon-btn:hover { background: rgba(255, 255, 255, 0.26); transform: scale(1.05); }
+
+    .sidebar-title {
+      font-size: 1.25rem;
+      font-weight: 900;
+      background: linear-gradient(90deg, #fff1f5 0%, #fb7185 50%, #c084fc 100%);
+      -webkit-background-clip: text;
+      background-clip: text;
+      color: transparent;
+      margin-bottom: 3px;
+    }
+    .sidebar-subtitle {
+      font-size: 0.78rem;
+      color: var(--muted);
+      line-height: 1.3;
+    }
+
+    .contacts-list {
+      flex: 1;
+      overflow-y: auto;
+      padding: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      -webkit-overflow-scrolling: touch;
+    }
+
+    .contact-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 14px;
+      border-radius: 18px;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid transparent;
+      cursor: pointer;
+      transition: all 0.18s ease;
+      position: relative;
+    }
+    .contact-item:hover { background: rgba(255, 255, 255, 0.10); }
+    .contact-item.active {
+      background: linear-gradient(135deg, rgba(225, 29, 72, 0.22), rgba(168, 85, 247, 0.22));
+      border-color: rgba(251, 113, 133, 0.4);
+      box-shadow: 0 8px 20px rgba(225, 29, 72, 0.15);
+    }
+    .contact-item.blocked {
+      opacity: 0.55;
+      background: rgba(0, 0, 0, 0.4);
+      border-color: rgba(255, 100, 100, 0.2);
+    }
+    .contact-item.pending {
+      border-color: rgba(245, 158, 11, 0.55);
+    }
+
+    .contact-left {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      min-width: 0;
+      flex: 1;
+    }
+    .contact-avatar {
+      width: 42px;
+      height: 42px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #e11d48, #9333ea);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 800;
+      color: #fff;
+      font-size: 1.05rem;
+      flex-shrink: 0;
+      position: relative;
+    }
+    .status-dot {
+      position: absolute;
+      bottom: 1px;
+      right: 1px;
+      width: 11px;
+      height: 11px;
+      border-radius: 50%;
+      background: #94a3b8;
+      border: 2px solid #180d1f;
+      box-shadow: 0 0 6px rgba(0,0,0,0.5);
+    }
+    .status-dot.online { background: var(--success); box-shadow: 0 0 8px var(--success); }
+    .status-dot.blocked { background: var(--danger); box-shadow: 0 0 8px var(--danger); }
+    .status-dot.ping {
+      background: var(--danger);
+      animation: pingPulse 1s infinite;
+    }
+
+    @keyframes pingPulse {
+      0%, 100% { transform: scale(1); opacity: 1; }
+      50% { transform: scale(1.4); opacity: 0.6; }
+    }
+
+    .contact-info {
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      flex: 1;
+    }
+    .contact-name {
+      font-weight: 700;
+      font-size: 0.94rem;
+      color: #fff;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .blocked-badge, .muted-badge, .qr-badge, .pending-badge {
+      font-size: 0.66rem;
+      padding: 1px 5px;
+      border-radius: 6px;
+      font-weight: 800;
+      flex-shrink: 0;
+    }
+    .blocked-badge { background: #991b1b; color: #fff; text-transform: uppercase; }
+    .muted-badge { background: #475569; color: #f1f5f9; }
+    .qr-badge { background: rgba(168, 85, 247, 0.4); color: #f3e8ff; }
+    .pending-badge { background: #b45309; color: #fff; }
+
+    .contact-preview {
+      font-size: 0.76rem;
+      color: var(--muted);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      margin-top: 2px;
+    }
+
+    .contact-right-tools {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-shrink: 0;
+      margin-left: 6px;
+    }
+    .delete-contact-btn {
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      color: #fecdd3;
+      width: 28px;
+      height: 28px;
+      padding: 0;
+      border-radius: 50%;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.8rem;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+    .delete-contact-btn:hover {
+      background: rgba(251, 113, 133, 0.35);
+      color: #fff;
+      transform: scale(1.1);
+    }
+
+    .badge-unread {
+      background: var(--primary);
+      color: #fff;
+      font-size: 0.72rem;
+      font-weight: 800;
+      padding: 2px 7px;
+      border-radius: 999px;
+      display: none;
+    }
+
+    .sidebar-footer {
+      padding: 14px;
+      border-top: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    /* BOUTONS ET FORMULAIRES */
+    button, input { font: inherit; }
+    button {
+      border: none;
+      border-radius: 999px;
+      padding: 10px 15px;
+      cursor: pointer;
+      font-weight: 700;
+      transition: transform 0.15s ease, background 0.2s ease, opacity 0.2s ease;
+      white-space: nowrap;
+    }
+    button:active { transform: scale(0.98); }
+    button:disabled { opacity: 0.55; cursor: not-allowed; }
+
+    .primary-btn {
+      width: 100%;
+      color: #fff;
+      background: linear-gradient(135deg, #e11d48, #9333ea);
+      box-shadow: 0 10px 25px rgba(225, 29, 72, 0.3);
+    }
+    .primary-btn:hover { background: linear-gradient(135deg, #be123c, #7e22ce); }
+
+    .secondary-btn {
+      background: rgba(255, 255, 255, 0.10);
+      color: #ffe4ec;
+      border: 1px solid rgba(255, 228, 236, 0.22);
+    }
+    .secondary-btn:hover { background: rgba(255, 255, 255, 0.18); }
+
+    .permanent-btn {
+      width: 100%;
+      background: rgba(168, 85, 247, 0.16);
+      color: #f3e8ff;
+      border: 1px solid rgba(192, 132, 252, 0.45);
+    }
+    .permanent-btn:hover { background: rgba(168, 85, 247, 0.3); }
+
+    .danger-btn {
+      background: rgba(251, 113, 133, 0.15);
+      color: #fecdd3;
+      border: 1px solid rgba(251, 113, 133, 0.35);
+    }
+    .danger-btn:hover { background: rgba(251, 113, 133, 0.28); color: #fff; }
+
+    .success-btn {
+      background: rgba(16, 185, 129, 0.18);
+      color: #a7f3d0;
+      border: 1px solid rgba(16, 185, 129, 0.4);
+    }
+    .success-btn:hover { background: rgba(16, 185, 129, 0.3); color: #fff; }
+
+    .small-btn { padding: 4px 12px; font-size: 0.78rem; }
+
+    /* ZONE DU CHAT PRINCIPAL */
+    .chat-area {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      background:
+        radial-gradient(circle at 80% 20%, rgba(225, 29, 72, 0.08), transparent 40%),
+        rgba(255, 255, 255, 0.02);
+      position: relative;
+      min-width: 0;
+      height: 100%;
+      overflow: hidden;
+    }
+
+    .chat-top-header {
+      padding: 10px 16px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      background: rgba(255, 255, 255, 0.03);
+      flex-shrink: 0;
+      min-height: 58px;
+      width: 100%;
+      max-width: 100%;
+      overflow: hidden;
+    }
+
+    .active-contact-profile {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-width: 0;
+      flex: 1;
+    }
+    .active-name {
+      font-weight: 800;
+      font-size: 1.05rem;
+      color: #fff;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .active-status-text {
+      font-size: 0.78rem;
+      color: var(--muted);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .led {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #94a3b8;
+      display: inline-block;
+      flex-shrink: 0;
+    }
+    .led.online { background: var(--success); box-shadow: 0 0 8px var(--success); }
+    .led.blocked { background: var(--danger); box-shadow: 0 0 8px var(--danger); }
+    .led.ping { background: var(--warning); box-shadow: 0 0 8px var(--warning); }
+
+    .e2ee-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      background: rgba(16, 185, 129, 0.15);
+      border: 1px solid rgba(16, 185, 129, 0.35);
+      color: #6ee7b7;
+      font-size: 0.7rem;
+      font-weight: 700;
+      padding: 3px 8px;
+      border-radius: 999px;
+      cursor: pointer;
+    }
+
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-shrink: 0;
+    }
+
+    .action-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 8px 12px;
+      border-radius: 999px;
+      font-weight: 700;
+      font-size: 0.8rem;
+      cursor: pointer;
+    }
+
+    .ping-btn {
+      background: linear-gradient(135deg, #f59e0b, #e11d48);
+      color: #fff;
+      box-shadow: 0 6px 18px rgba(245, 158, 11, 0.3);
+      animation: subtleGlow 2.5s infinite alternate;
+    }
+    .ping-btn:hover { background: linear-gradient(135deg, #d97706, #be123c); }
+
+    @keyframes subtleGlow {
+      0% { box-shadow: 0 6px 18px rgba(245, 158, 11, 0.3); }
+      100% { box-shadow: 0 10px 24px rgba(225, 29, 72, 0.5); }
+    }
+
+    .call-btn {
+      background: rgba(16, 185, 129, 0.2);
+      border: 1px solid rgba(16, 185, 129, 0.4);
+      color: #a7f3d0;
+    }
+    .call-btn:hover { background: rgba(16, 185, 129, 0.35); color: #fff; }
+
+    .menu-more-btn {
+      background: rgba(255, 255, 255, 0.12);
+      border: 1px solid rgba(255, 255, 255, 0.22);
+      color: #fff;
+      width: 36px;
+      height: 36px;
+      padding: 0;
+      border-radius: 50%;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      font-size: 1.15rem;
+    }
+    .menu-more-btn:hover { background: rgba(255, 255, 255, 0.24); }
+
+    /* BANNIÈRES D'INFORMATION */
+    .notif-banner, .blocked-banner, .muted-banner, .offline-banner, .webview-warning-banner, .approval-banner {
+      padding: 8px 16px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      font-size: 0.8rem;
+      flex-shrink: 0;
+      line-height: 1.35;
+      width: 100%;
+      flex-wrap: wrap;
+    }
+    .notif-banner {
+      background: linear-gradient(90deg, rgba(225, 29, 72, 0.25), rgba(168, 85, 247, 0.25));
+      border-bottom: 1px solid rgba(251, 113, 133, 0.3);
+    }
+    .blocked-banner {
+      background: rgba(185, 28, 28, 0.25);
+      border-bottom: 1px solid rgba(239, 68, 68, 0.4);
+      color: #fecaca;
+    }
+    .muted-banner {
+      background: rgba(71, 85, 105, 0.35);
+      border-bottom: 1px solid rgba(148, 163, 184, 0.3);
+      color: #e2e8f0;
+    }
+    .offline-banner {
+      background: rgba(245, 158, 11, 0.2);
+      border-bottom: 1px solid rgba(245, 158, 11, 0.4);
+      color: #fef3c7;
+    }
+    .webview-warning-banner {
+      background: #38182b;
+      border-bottom: 1px solid #fb7185;
+      color: #ffe4ec;
+      font-weight: 600;
+    }
+    .approval-banner {
+      background: linear-gradient(90deg, rgba(245, 158, 11, 0.25), rgba(168, 85, 247, 0.22));
+      border-bottom: 1px solid rgba(245, 158, 11, 0.45);
+      color: #fef3c7;
+    }
+
+    /* LISTE DE MESSAGES */
+    .messages-container {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      scroll-behavior: smooth;
+      -webkit-overflow-scrolling: touch;
+      width: 100%;
+    }
+
+    .message {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+      max-width: 82%;
+      animation: fadeIn 0.22s ease-out;
+    }
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(6px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .message.local { align-self: flex-end; align-items: flex-end; }
+    .message.remote { align-self: flex-start; align-items: flex-start; }
+    .message.system { align-self: center; align-items: center; max-width: 92%; }
+
+    .message-author {
+      font-size: 0.72rem;
+      color: var(--muted);
+      padding: 0 8px;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .message-bubble {
+      padding: 10px 14px;
+      border-radius: 18px;
+      line-height: 1.38;
+      overflow-wrap: anywhere;
+      white-space: pre-wrap;
+      font-size: 0.94rem;
+    }
+
+    .local .message-bubble {
+      background: var(--bubble-local);
+      color: #fff;
+      border-bottom-right-radius: 6px;
+      box-shadow: 0 8px 18px rgba(225, 29, 72, 0.22);
+    }
+    .remote .message-bubble {
+      background: var(--bubble-remote);
+      color: var(--text);
+      border: 1px solid rgba(255, 228, 236, 0.16);
+      border-bottom-left-radius: 6px;
+    }
+    .system .message-bubble {
+      background: rgba(255, 255, 255, 0.08);
+      color: #fed7aa;
+      border: 1px dashed rgba(251, 146, 60, 0.4);
+      font-size: 0.8rem;
+      text-align: center;
+      padding: 6px 14px;
+      border-radius: 999px;
+    }
+
+    .media-bubble {
+      padding: 6px;
+      background: rgba(255, 255, 255, 0.10);
+      border: 1px solid rgba(255, 228, 236, 0.16);
+      cursor: pointer;
+    }
+    .chat-image {
+      display: block;
+      width: min(240px, 68vw);
+      max-height: 280px;
+      object-fit: contain;
+      border-radius: 12px;
+    }
+
+    /* FOOTER (SAISIE & ACTIONS) */
+    .chat-input-wrapper {
+      padding: 10px 14px max(14px, env(safe-area-inset-bottom, 14px));
+      background: rgba(255, 255, 255, 0.03);
+      border-top: 1px solid var(--border);
+      flex-shrink: 0;
+      width: 100%;
+      flex-direction: column;
+    }
+
+    .quick-toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 8px;
+      width: 100%;
+    }
+    .emojis-row {
+      display: flex;
+      gap: 6px;
+      overflow-x: auto;
+      scrollbar-width: none;
+      -webkit-overflow-scrolling: touch;
+    }
+    .emojis-row::-webkit-scrollbar { display: none; }
+    .emoji-btn {
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid rgba(255, 255, 255, 0.14);
+      border-radius: 999px;
+      padding: 4px 10px;
+      font-size: 1.05rem;
+      cursor: pointer;
+    }
+
+    .input-row {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      width: 100%;
+    }
+    #chat-input {
+      flex: 1;
+      min-width: 0;
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 12px 16px;
+      color: #fff;
+      font-size: 16px !important;
+      outline: none;
+    }
+    #chat-input::placeholder { color: rgba(255, 228, 236, 0.5); }
+    #chat-input:focus {
+      border-color: rgba(251, 113, 133, 0.8);
+      box-shadow: 0 0 0 3px rgba(225, 29, 72, 0.18);
+    }
+
+    #send-btn, #image-btn {
+      color: #fff;
+      background: linear-gradient(135deg, #e11d48, #9333ea);
+      padding-inline: 18px;
+      height: 44px;
+      flex-shrink: 0;
+    }
+    #image-btn {
+      width: 44px;
+      min-width: 44px;
+      padding-inline: 0;
+      font-size: 1.15rem;
+    }
+
+    /* MODAUX */
+    .modal-overlay {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      background: rgba(10, 5, 14, 0.88);
+      z-index: 2000;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+      backdrop-filter: blur(8px);
+    }
+    .modal-card {
+      width: min(100%, 480px);
+      max-height: 90vh;
+      overflow-y: auto;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 24px;
+      padding: 22px;
+      box-shadow: 0 25px 80px rgba(0,0,0,0.6);
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+    .modal-card h2 { font-size: 1.3rem; font-weight: 900; }
+    .modal-card p { color: var(--muted); font-size: 0.88rem; line-height: 1.4; }
+    .form-group { display: flex; flex-direction: column; gap: 6px; }
+    .form-group label { font-size: 0.82rem; font-weight: 700; color: #fff; }
+    .form-group input {
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 12px 14px;
+      color: #fff;
+      font-size: 16px !important;
+      outline: none;
+    }
+    .link-share-box {
+      background: rgba(0,0,0,0.3);
+      border: 1px dashed rgba(255,255,255,0.22);
+      border-radius: 14px;
+      padding: 10px;
+      font-family: monospace;
+      font-size: 0.78rem;
+      color: #fce7f3;
+      word-break: break-all;
+    }
+    .modal-actions {
+      display: flex;
+      gap: 8px;
+      margin-top: 6px;
+      flex-wrap: wrap;
+    }
+
+    /* QR CODES */
+    .qr-preview-container {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 12px;
+      margin: 6px 0;
+    }
+    #qrcode-box, #permanent-qrcode-box {
+      background: #fff;
+      padding: 14px;
+      border-radius: 16px;
+      border: 1px solid #e2e8f0;
+      box-shadow: 0 10px 25px rgba(0,0,0,0.2);
+    }
+    #qrcode-box img, #qrcode-box canvas,
+    #permanent-qrcode-box img, #permanent-qrcode-box canvas {
+      display: block;
+      width: 200px !important;
+      height: 200px !important;
+    }
+
+    /* PARAMÈTRES QR PERMANENT */
+    .settings-list { width: 100%; display: flex; flex-direction: column; gap: 8px; }
+    .toggle-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 12px;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      font-size: 0.86rem;
+      text-align: left;
+      cursor: pointer;
+    }
+    .toggle-row small { display: block; color: var(--muted); font-size: 0.74rem; margin-top: 2px; }
+    .toggle-row input { width: 20px; height: 20px; accent-color: #e11d48; flex-shrink: 0; cursor: pointer; }
+    .permanent-status {
+      font-size: 0.82rem;
+      font-weight: 700;
+      padding: 6px 12px;
+      border-radius: 999px;
+    }
+    .permanent-status.on { background: rgba(16, 185, 129, 0.16); color: #6ee7b7; border: 1px solid rgba(16,185,129,0.4); }
+    .permanent-status.off { background: rgba(251, 113, 133, 0.16); color: #fecdd3; border: 1px solid rgba(251,113,133,0.4); }
+    .modal-section-title {
+      width: 100%;
+      text-align: left;
+      font-size: 0.78rem;
+      font-weight: 800;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-top: 4px;
+    }
+
+    /* APPEL VIDÉO */
+    .video-modal-overlay {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      background: #09030b;
+      z-index: 1500;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 12px;
+    }
+    .video-container {
+      position: relative;
+      width: min(100%, 960px);
+      height: min(85vh, 640px);
+      background: #110816;
+      border-radius: 24px;
+      overflow: hidden;
+      border: 1px solid rgba(255,255,255,0.15);
+      box-shadow: 0 25px 80px rgba(0,0,0,0.8);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    #remote-video { width: 100%; height: 100%; object-fit: cover; background: #000; }
+    #local-video {
+      position: absolute;
+      bottom: 24px;
+      right: 24px;
+      width: 160px;
+      height: 120px;
+      border-radius: 16px;
+      object-fit: cover;
+      background: #201128;
+      border: 2px solid rgba(255,255,255,0.25);
+      box-shadow: 0 10px 30px rgba(0,0,0,0.6);
+      transform: scaleX(-1);
+    }
+    .video-controls-bar {
+      position: absolute;
+      bottom: 24px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      background: rgba(28, 14, 34, 0.88);
+      padding: 10px 18px;
+      border-radius: 999px;
+      border: 1px solid rgba(255,255,255,0.2);
+      backdrop-filter: blur(14px);
+    }
+    .video-control-btn {
+      width: 44px;
+      height: 44px;
+      padding: 0;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.2rem;
+      background: rgba(255,255,255,0.12);
+      color: #fff;
+      cursor: pointer;
+      border: 1px solid rgba(255,255,255,0.15);
+    }
+    .video-control-btn.hangup {
+      background: var(--danger);
+      box-shadow: 0 0 18px rgba(251, 113, 133, 0.5);
+    }
+
+    /* ÉTAT VIDE */
+    .empty-state {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      text-align: center;
+      gap: 12px;
+      color: var(--muted);
+      width: 100%;
+    }
+    .empty-state-icon { font-size: 3.2rem; margin-bottom: 4px; }
+    .empty-state h3 { font-size: 1.3rem; color: #fff; font-weight: 800; }
+
+    /* LIGHTBOX */
+    .lightbox {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      background: rgba(0,0,0,0.92);
+      z-index: 3000;
+      align-items: center;
+      justify-content: center;
+    }
+    .lightbox img {
+      max-width: 92vw;
+      max-height: 92vh;
+      object-fit: contain;
+      border-radius: 12px;
+    }
+
+    /* ======================= MOBILE ======================= */
+    .desktop-only-action { display: inline-flex; }
+    .mobile-back-btn { display: none; }
+
+    @media (max-width: 768px) {
+      html, body {
+        position: fixed !important;
+        top: 0 !important;
+        left: 0 !important;
+        right: 0 !important;
+        bottom: 0 !important;
+        width: 100% !important;
+        height: 100% !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        overflow: hidden !important;
+        background: #0d0610 !important;
+        display: block !important;
+      }
+
+      .app-wrapper {
+        position: absolute !important;
+        top: 0 !important;
+        left: 0 !important;
+        right: 0 !important;
+        bottom: 0 !important;
+        width: 100% !important;
+        height: 100% !important;
+        max-width: none !important;
+        max-height: none !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        border: none !important;
+        border-radius: 0 !important;
+        box-shadow: none !important;
+        overflow: hidden !important;
+        display: flex !important;
+      }
+
+      .sidebar {
+        position: absolute;
+        top: 0;
+        left: 0;
+        bottom: 0;
+        width: 100%;
+        height: 100%;
+        transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+        background: #0e0512;
+      }
+      .sidebar.hidden-mobile {
+        transform: translateX(-100%);
+        pointer-events: none;
+      }
+
+      .chat-area { width: 100%; height: 100%; }
+
+      .chat-top-header {
+        padding: 8px 12px;
+        min-height: 54px;
+        gap: 6px;
+        width: 100%;
+      }
+
+      .desktop-only-action { display: none !important; }
+      .header-actions { gap: 5px; }
+      .action-btn {
+        padding: 7px 10px !important;
+        font-size: 0.78rem !important;
+      }
+
+      .mobile-back-btn {
+        display: inline-flex !important;
+        background: rgba(255,255,255,0.12);
+        color: #fff;
+        border: 1px solid rgba(255,255,255,0.22);
+        width: 36px;
+        height: 36px;
+        padding: 0;
+        border-radius: 50%;
+        align-items: center;
+        justify-content: center;
+        margin-right: 8px;
+        cursor: pointer;
+        flex-shrink: 0;
+      }
+
+      .messages-container { padding: 12px; gap: 8px; }
+      .message { max-width: 88%; }
+      .message-bubble { padding: 9px 13px; font-size: 0.9rem; }
+
+      .chat-input-wrapper {
+        padding: 8px 10px max(12px, env(safe-area-inset-bottom, 12px));
+        width: 100%;
+      }
+      #chat-input { padding: 10px 14px; font-size: 16px !important; }
+      #send-btn { padding-inline: 14px; height: 40px; font-size: 0.88rem; }
+      #image-btn { width: 40px; min-width: 40px; height: 40px; }
+
+      #local-video {
+        width: 110px;
+        height: 82px;
+        bottom: 85px;
+        right: 12px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="app-wrapper">
+    <!-- SIDEBAR : TABLEAU DE BORD HÔTE -->
+    <aside id="sidebar" class="sidebar">
+      <div class="sidebar-header">
+        <div class="sidebar-top-row">
+          <div class="brand-badge">🔒 AES-256 E2EE</div>
+          <div class="sidebar-actions">
+            <button id="sound-toggle-btn" class="icon-btn" title="Activer/Désactiver tous les sons et sonneries" aria-label="Sons">🔊</button>
+            <button id="info-host-btn" class="icon-btn" title="Sécurité, Silence et Isolation" aria-label="Infos">🛡️</button>
+          </div>
+        </div>
+        <div class="sidebar-title">Discutons Privé</div>
+        <div class="sidebar-subtitle">Canaux isolés · Vidéo P2P · QR Code permanent</div>
+      </div>
+
+      <div id="contacts-list" class="contacts-list">
+        <!-- Rempli dynamiquement -->
+      </div>
+
+      <div class="sidebar-footer">
+        <button id="permanent-qr-btn" class="permanent-btn" type="button">
+          📌 Mon QR code permanent
+        </button>
+        <button id="new-link-btn" class="primary-btn" type="button">
+          ➕ Créer un lien privé
+        </button>
+      </div>
+    </aside>
+
+    <!-- ZONE DE CHAT -->
+    <main id="chat-area" class="chat-area">
+      <div id="webview-warning-banner" class="webview-warning-banner" style="display: none;">
+        <span>⚠️ <strong>Alerte Lecteur QR :</strong> Votre navigateur photo bloque le micro et la caméra. Cliquez sur "Ouvrir dans Safari / Chrome" !</span>
+      </div>
+
+      <div id="notif-banner" class="notif-banner" style="display: none;">
+        <span>🔔 Activez les notifications pour être alerté en direct à tout moment !</span>
+        <button id="enable-notif-btn" type="button">Activer</button>
+      </div>
+
+      <!-- Bannière : fil créé via QR permanent en attente de validation -->
+      <div id="approval-banner" class="approval-banner" style="display: none;">
+        <span>🆕 <strong>Nouveau fil via votre QR permanent</strong> — lisez ses messages puis décidez.</span>
+        <div style="display: flex; gap: 6px;">
+          <button id="approve-thread-btn" class="success-btn small-btn" type="button">✅ Accepter</button>
+          <button id="reject-thread-btn" class="danger-btn small-btn" type="button">❌ Refuser</button>
+        </div>
+      </div>
+
+      <div id="blocked-banner" class="blocked-banner" style="display: none;">
+        <span>🚫 Contact bloqué. Ses appels et messages sont rejetés.</span>
+        <button id="unblock-banner-btn" class="success-btn small-btn" type="button">Débloquer</button>
+      </div>
+
+      <div id="muted-banner" class="muted-banner" style="display: none;">
+        <span>🔕 Sonneries muettes pour ce contact. Alertes visuelles actives en silence.</span>
+        <button id="unmute-banner-btn" class="secondary-btn small-btn" type="button">Réactiver le son</button>
+      </div>
+
+      <div id="offline-banner" class="offline-banner" style="display: none;">
+        <span id="offline-banner-text">⏳ <strong>Hôte hors ligne :</strong> Message sauvegardé, envoyé dès qu'il s'ouvre.</span>
+        <button id="reconnect-btn" class="secondary-btn small-btn" type="button">🔄 Reconnecter</button>
+      </div>
+
+      <!-- En-tête de la conversation active -->
+      <div id="chat-header" class="chat-top-header" style="display: none;">
+        <div class="active-contact-profile">
+          <button id="mobile-back-btn" class="mobile-back-btn" title="Retour aux contacts">⬅️</button>
+          <div style="min-width: 0;">
+            <div id="active-name" class="active-name">Contact</div>
+            <div class="active-status-text">
+              <span id="active-led" class="led"></span>
+              <span id="active-status-label">Hors ligne</span>
+              <span id="e2ee-status-badge" class="e2ee-badge" title="Chiffrement des messages AES-256-GCM">🛡️ E2EE</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="header-actions" id="header-actions">
+          <button id="video-call-btn" class="action-btn call-btn" type="button" title="Lancer un appel vidéo en direct (DTLS-SRTP)">
+            🎥 <span class="desktop-only-action">Vidéo</span>
+          </button>
+          <button id="audio-call-btn" class="action-btn call-btn" type="button" title="Lancer un appel vocal en direct">
+            📞 <span class="desktop-only-action">Audio</span>
+          </button>
+          <button id="ping-btn" class="action-btn ping-btn" type="button" title="Envoyer une alerte sonore et visuelle en direct">
+            🔔 <span class="desktop-only-action">Notifier</span>
+          </button>
+
+          <button id="share-active-btn" class="action-btn secondary-btn desktop-only-action" title="Afficher le QR code et le lien secret de cette personne">
+            📱 QR & Lien
+          </button>
+          <button id="mute-contact-btn" class="action-btn secondary-btn desktop-only-action" title="Muter / Réactiver les sonneries pour cette conversation">
+            🔊 Son
+          </button>
+          <button id="block-btn" class="action-btn danger-btn desktop-only-action" title="Bloquer cet interlocuteur">
+            🚫 Bloquer
+          </button>
+          <button id="delete-chat-btn" class="action-btn danger-btn desktop-only-action" title="Supprimer définitivement ce contact et sa conversation">
+            🗑️ Supprimer
+          </button>
+
+          <button id="more-options-btn" class="menu-more-btn" title="Plus d'options (Renommer, QR Code, Son, Bloquer, Supprimer)" type="button">⋮</button>
+        </div>
+      </div>
+
+      <!-- État vide -->
+      <div id="empty-state" class="empty-state">
+        <div class="empty-state-icon">💌</div>
+        <h3>Sélectionnez ou créez un lien de discussion</h3>
+        <p style="max-width: 440px;">
+          Créez un <strong>lien secret par contact</strong>, ou affichez votre <strong>QR code permanent</strong> :
+          chaque personne qui le scanne ouvre son propre fil privé, dont <strong>vous restez maître</strong>
+          (renommer, valider, couper le son, bloquer, supprimer).
+        </p>
+        <div style="display: flex; gap: 8px; flex-wrap: wrap; justify-content: center;">
+          <button id="empty-permanent-btn" class="permanent-btn" style="width: auto; padding-inline: 22px;" type="button">📌 QR code permanent</button>
+          <button id="empty-create-btn" class="primary-btn" style="width: auto; padding-inline: 22px;" type="button">➕ Créer un lien secret</button>
+        </div>
+      </div>
+
+      <div id="messages-container" class="messages-container" style="display: none;"></div>
+
+      <div id="chat-footer" class="chat-input-wrapper" style="display: none;">
+        <div class="quick-toolbar">
+          <div class="emojis-row" id="quick-emojis">
+            <button class="emoji-btn" type="button">❤️</button>
+            <button class="emoji-btn" type="button">🔥</button>
+            <button class="emoji-btn" type="button">✨</button>
+            <button class="emoji-btn" type="button">👏</button>
+            <button class="emoji-btn" type="button">😍</button>
+            <button class="emoji-btn" type="button">😆</button>
+            <button class="emoji-btn" type="button">🎥</button>
+            <button class="emoji-btn" type="button">🔔</button>
+          </div>
+          <span id="typing-badge" style="font-size: 0.78rem; color: var(--muted); display: none;">✍️ Écrit un message chiffré...</span>
+        </div>
+
+        <div class="input-row">
+          <button id="image-btn" type="button" title="Envoyer une photo">📷</button>
+          <input type="file" id="image-input" accept="image/*" hidden />
+          <input type="text" id="chat-input" placeholder="Écrire un message chiffré E2EE..." autocomplete="off" maxlength="2000" />
+          <button id="send-btn" type="button">Envoyer</button>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <!-- 1. MODAL DE CRÉATION DE NOUVEAU LIEN PRIVÉ -->
+  <div id="create-modal" class="modal-overlay">
+    <div class="modal-card">
+      <h2>Créer un lien de discussion</h2>
+      <p>Donnez un nom ou un repère privé à ce contact (ce nom est visible <strong>uniquement par vous</strong>).</p>
+      <div class="form-group">
+        <label for="contact-alias-input">Nom / Alias du contact</label>
+        <input type="text" id="contact-alias-input" placeholder="ex: Alice, Contact Pro, Inconnue #1..." maxlength="40" />
+      </div>
+      <div class="modal-actions">
+        <button id="confirm-create-btn" class="primary-btn" type="button">Générer le QR Code & Lien</button>
+        <button id="close-modal-btn" class="secondary-btn" type="button">Fermer</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 2. MODAL DE PARTAGE (QR CODE INDIVIDUEL) -->
+  <div id="share-modal" class="modal-overlay">
+    <div class="modal-card" style="align-items: center; text-align: center;">
+      <h2>Inviter <span id="share-modal-name" style="color: #fb7185;">Contact</span></h2>
+      <p>Faites <strong>scanner ce QR code</strong> en direct, ou envoyez <strong>le lien secret</strong> par message pour discuter à tout moment.</p>
+      <div class="qr-preview-container"><div id="qrcode-box"></div></div>
+      <div id="secret-link-display" class="link-share-box" style="width: 100%;"></div>
+      <div class="modal-actions" style="width: 100%; justify-content: center;">
+        <button id="copy-share-btn" class="primary-btn" style="flex: 1;" type="button">📋 Copier le lien</button>
+        <button id="native-share-btn" class="secondary-btn" style="flex: 1; display: none;" type="button">📤 Partager</button>
+        <button id="close-share-modal-btn" class="secondary-btn" style="width: 100%;" type="button">Fermer</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 2bis. MODAL QR CODE PERMANENT (HÔTE) -->
+  <div id="permanent-modal" class="modal-overlay">
+    <div class="modal-card" style="align-items: center; text-align: center;">
+      <h2>📌 Mon QR code permanent</h2>
+      <p>
+        Toute personne qui scanne ce QR code <strong>crée son propre fil privé</strong> avec vous.
+        Le fil est enregistré <strong>chez vous</strong> : vous pouvez le valider, le renommer, couper le son,
+        le bloquer ou le supprimer, et mettre le QR en pause à tout moment.
+      </p>
+      <span id="permanent-status" class="permanent-status on">🟢 Actif</span>
+
+      <div class="qr-preview-container"><div id="permanent-qrcode-box"></div></div>
+      <div id="permanent-link-display" class="link-share-box" style="width: 100%;"></div>
+
+      <div class="modal-actions" style="width: 100%; justify-content: center; margin-top: 0;">
+        <button id="permanent-copy-btn" class="primary-btn" style="flex: 1;" type="button">📋 Copier le lien</button>
+        <button id="permanent-download-btn" class="secondary-btn" style="flex: 1;" type="button">⬇️ PNG à imprimer</button>
+        <button id="permanent-share-btn" class="secondary-btn" style="flex: 1; display: none;" type="button">📤 Partager</button>
+      </div>
+
+      <div class="modal-section-title">Contrôle des nouveaux fils</div>
+      <div class="settings-list">
+        <label class="toggle-row" for="invite-enabled-toggle">
+          <span><strong>Accepter de nouveaux fils</strong><small>Désactivé : le QR reste imprimé mais plus personne ne peut créer de fil (les fils existants continuent).</small></span>
+          <input type="checkbox" id="invite-enabled-toggle" />
+        </label>
+        <label class="toggle-row" for="invite-approval-toggle">
+          <span><strong>Validation manuelle</strong><small>Chaque nouveau fil reste « À valider » : vous lisez ses messages, puis acceptez ou refusez.</small></span>
+          <input type="checkbox" id="invite-approval-toggle" />
+        </label>
+      </div>
+
+      <div class="modal-section-title">Sécurité & permanence</div>
+      <div class="modal-actions" style="width: 100%; margin-top: 0;">
+        <button id="permanent-regen-btn" class="danger-btn" style="flex: 1;" type="button">🔄 Révoquer & régénérer</button>
+        <button id="backup-export-btn" class="secondary-btn" style="flex: 1;" type="button">💾 Sauvegarder</button>
+        <button id="backup-import-btn" class="secondary-btn" style="flex: 1;" type="button">📂 Restaurer</button>
+        <input type="file" id="backup-import-input" accept="application/json,.json" hidden />
+      </div>
+      <p style="font-size: 0.76rem;">
+        ⚠️ Le QR dépend de votre identité d'hôte stockée dans <strong>ce navigateur</strong>.
+        Faites une sauvegarde : elle permet de restaurer le même QR sur un autre appareil.
+      </p>
+
+      <button id="close-permanent-modal-btn" class="secondary-btn" style="width: 100%;" type="button">Fermer</button>
+    </div>
+  </div>
+
+  <!-- 2ter. MODAL D'ARRIVÉE INVITÉ (via QR permanent) -->
+  <div id="join-modal" class="modal-overlay">
+    <div class="modal-card">
+      <h2>💬 Démarrer une discussion privée</h2>
+      <p>
+        Choisissez un pseudo. Votre fil de discussion sera créé et vous le retrouverez sur cet appareil
+        en rescannant le même QR code. Vos messages sont remis dès que votre interlocuteur est en ligne.
+      </p>
+      <div class="form-group">
+        <label for="join-alias-input">Votre pseudo</label>
+        <input type="text" id="join-alias-input" placeholder="ex: Julie, Marc, Client table 4..." maxlength="30" autocomplete="off" />
+      </div>
+      <div class="modal-actions">
+        <button id="confirm-join-btn" class="primary-btn" type="button">Créer mon fil de discussion</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 3. MODAL MENU "PLUS D'OPTIONS" -->
+  <div id="more-menu-modal" class="modal-overlay">
+    <div class="modal-card">
+      <h2>Gestion du contact</h2>
+      <p>Choisissez une action pour cette conversation :</p>
+      <div style="display: flex; flex-direction: column; gap: 8px;">
+        <button id="menu-rename-btn" class="secondary-btn" style="text-align: left; padding: 14px;" type="button">
+          ✏️ <strong>Renommer ce contact</strong>
+        </button>
+        <button id="menu-qr-btn" class="secondary-btn" style="text-align: left; padding: 14px;" type="button">
+          📱 <strong>Afficher le QR Code & Lien secret</strong>
+        </button>
+        <button id="menu-mute-btn" class="secondary-btn" style="text-align: left; padding: 14px;" type="button">
+          🔊 <strong>Muter / Réactiver les sonneries</strong>
+        </button>
+        <button id="menu-block-btn" class="danger-btn" style="text-align: left; padding: 14px;" type="button">
+          🚫 <strong>Bloquer / Débloquer cet interlocuteur</strong>
+        </button>
+        <button id="menu-delete-btn" class="danger-btn" style="text-align: left; padding: 14px; background: #7f1d1d; color: #fecdd3;" type="button">
+          🗑️ <strong>Supprimer définitivement ce contact</strong>
+        </button>
+      </div>
+      <div class="modal-actions" style="margin-top: 10px;">
+        <button id="close-more-menu-btn" class="secondary-btn" style="width: 100%;" type="button">Fermer</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 4. MODAL D'APPEL ENTRANT -->
+  <div id="incoming-call-modal" class="modal-overlay">
+    <div class="modal-card" style="text-align: center; align-items: center;">
+      <div style="font-size: 3rem; animation: pingPulse 1s infinite;">🎥</div>
+      <h2>Appel Entrant de <span id="incoming-caller-name" style="color: #10b981;">Contact</span></h2>
+      <p id="incoming-call-type-label">Souhaite lancer un appel vidéo chiffré avec vous !</p>
+      <div class="modal-actions" style="width: 100%; justify-content: center; margin-top: 10px;">
+        <button id="accept-video-btn" class="success-btn" style="flex: 1; padding: 14px;" type="button">✅ Décrocher (Vidéo)</button>
+        <button id="accept-audio-btn" class="secondary-btn" style="flex: 1; padding: 14px;" type="button">📞 Audio seul</button>
+        <button id="reject-call-btn" class="danger-btn" style="width: 100%; padding: 12px; margin-top: 4px;" type="button">❌ Refuser</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 5. FENÊTRE D'APPEL -->
+  <div id="video-modal" class="video-modal-overlay">
+    <div class="video-container">
+      <video id="remote-video" autoplay playsinline></video>
+      <video id="local-video" autoplay playsinline muted></video>
+      <div class="video-controls-bar">
+        <button id="mute-audio-btn" class="video-control-btn" title="Couper/Activer le micro" type="button">🎤</button>
+        <button id="mute-video-btn" class="video-control-btn" title="Couper/Activer la caméra" type="button">📷</button>
+        <button id="fullscreen-video-btn" class="video-control-btn" title="Plein écran" type="button">🔄</button>
+        <button id="hangup-call-btn" class="video-control-btn hangup" title="Raccrocher" type="button">❌</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 6. MODAL INFO CHIFFREMENT -->
+  <div id="e2ee-info-modal" class="modal-overlay">
+    <div class="modal-card">
+      <h2 style="color: #6ee7b7; display: flex; align-items: center; gap: 8px;">🛡️ Sécurité & Chiffrement</h2>
+      <p>Cette application applique une protection cryptographique à double couche :</p>
+      <div style="background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 14px; padding: 14px; font-size: 0.86rem; line-height: 1.45;">
+        <strong>1. Flux Vidéo / Audio (DTLS-SRTP)</strong><br/>
+        Les appels sont chiffrés nativement par WebRTC en pair-à-pair. Aucun serveur intermédiaire ne reçoit votre flux (sauf réseau très restrictif nécessitant un relais).<br/><br/>
+        <strong>2. Messages & Photos (AES-256-GCM)</strong><br/>
+        Chaque message est chiffré par la Web Crypto API avec un IV unique, en plus du chiffrement DTLS du canal WebRTC.
+        La clé est dérivée de l'identifiant du fil : <strong>toute personne qui possède le lien du fil peut la recalculer</strong>, gardez donc vos liens secrets.
+      </div>
+      <div class="modal-actions">
+        <button id="close-e2ee-modal-btn" class="primary-btn" type="button">Compris</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- LIGHTBOX IMAGE -->
+  <div id="lightbox" class="lightbox">
+    <img id="lightbox-img" src="" alt="Photo agrandie" />
+  </div>
+
+  <script>
+    (() => {
+      "use strict";
+
+      const PEER_OPTIONS = {
+        host: "0.peerjs.com",
+        port: 443,
+        path: "/",
+        secure: true,
+        debug: 1,
+        config: {
+          iceServers: [
+            { urls: "stun:stun.l.google.com:19302" },
+            { urls: "stun:global.stun.twilio.com:3478" },
+            { urls: "stun:stun1.l.google.com:19302" },
+            { urls: "stun:stun2.l.google.com:19302" }
+          ]
+        }
+      };
+
+      /* ---------- Clés de stockage ---------- */
+      const KEY_HOST_ID = "discutons_host_id";
+      const KEY_CONTACTS = "discutons_contacts";
+      const KEY_INVITE = "discutons_invite";          // réglages du QR permanent
+      const KEY_BANNED = "discutons_banned";          // fils supprimés / refusés (non recréables)
+      const KEY_GUEST_THREADS = "discutons_guest_threads"; // côté invité : fil créé par hôte
+      const LEGACY_MSG_KEY = "discutons_messages";
+      const LEGACY_OUTBOX_KEY = "discutons_outbox";
+      let msgKey = LEGACY_MSG_KEY;
+      let outboxKey = LEGACY_OUTBOX_KEY;
+
+      const CHANNEL_ID_REGEX = /^c-[a-z0-9]{6,24}$/;
+      const HOST_ID_REGEX = /^host-[a-z0-9]{4,32}$/;
+      const MAX_AUTO_CREATES_PER_MINUTE = 5;
+      const MAX_BANNED = 1000;
+
+      /* ---------- DOM ---------- */
+      const $ = id => document.getElementById(id);
+      const sidebar = $("sidebar");
+      const contactsList = $("contacts-list");
+      const newLinkBtn = $("new-link-btn");
+      const emptyCreateBtn = $("empty-create-btn");
+      const permanentQrBtn = $("permanent-qr-btn");
+      const emptyPermanentBtn = $("empty-permanent-btn");
+      const chatHeader = $("chat-header");
+      const emptyState = $("empty-state");
+      const messagesContainer = $("messages-container");
+      const chatFooter = $("chat-footer");
+      const activeName = $("active-name");
+      const activeLed = $("active-led");
+      const activeStatusLabel = $("active-status-label");
+      const e2eeStatusBadge = $("e2ee-status-badge");
+      const pingBtn = $("ping-btn");
+      const shareActiveBtn = $("share-active-btn");
+      const blockBtn = $("block-btn");
+      const deleteChatBtn = $("delete-chat-btn");
+      const muteContactBtn = $("mute-contact-btn");
+      const mobileBackBtn = $("mobile-back-btn");
+      const moreOptionsBtn = $("more-options-btn");
+      const videoCallBtn = $("video-call-btn");
+      const audioCallBtn = $("audio-call-btn");
+
+      const chatInput = $("chat-input");
+      const sendBtn = $("send-btn");
+      const imageBtn = $("image-btn");
+      const imageInput = $("image-input");
+      const quickEmojis = $("quick-emojis");
+      const typingBadge = $("typing-badge");
+
+      const soundToggleBtn = $("sound-toggle-btn");
+      const infoHostBtn = $("info-host-btn");
+      const notifBanner = $("notif-banner");
+      const enableNotifBtn = $("enable-notif-btn");
+      const blockedBanner = $("blocked-banner");
+      const unblockBannerBtn = $("unblock-banner-btn");
+      const mutedBanner = $("muted-banner");
+      const unmuteBannerBtn = $("unmute-banner-btn");
+      const offlineBanner = $("offline-banner");
+      const offlineBannerText = $("offline-banner-text");
+      const reconnectBtn = $("reconnect-btn");
+      const webviewWarningBanner = $("webview-warning-banner");
+      const approvalBanner = $("approval-banner");
+      const approveThreadBtn = $("approve-thread-btn");
+      const rejectThreadBtn = $("reject-thread-btn");
+
+      const createModal = $("create-modal");
+      const contactAliasInput = $("contact-alias-input");
+      const confirmCreateBtn = $("confirm-create-btn");
+      const closeModalBtn = $("close-modal-btn");
+
+      const shareModal = $("share-modal");
+      const shareModalName = $("share-modal-name");
+      const qrcodeBox = $("qrcode-box");
+      const secretLinkDisplay = $("secret-link-display");
+      const copyShareBtn = $("copy-share-btn");
+      const nativeShareBtn = $("native-share-btn");
+      const closeShareModalBtn = $("close-share-modal-btn");
+
+      const permanentModal = $("permanent-modal");
+      const permanentStatus = $("permanent-status");
+      const permanentQrBox = $("permanent-qrcode-box");
+      const permanentLinkDisplay = $("permanent-link-display");
+      const permanentCopyBtn = $("permanent-copy-btn");
+      const permanentDownloadBtn = $("permanent-download-btn");
+      const permanentShareBtn = $("permanent-share-btn");
+      const inviteEnabledToggle = $("invite-enabled-toggle");
+      const inviteApprovalToggle = $("invite-approval-toggle");
+      const permanentRegenBtn = $("permanent-regen-btn");
+      const backupExportBtn = $("backup-export-btn");
+      const backupImportBtn = $("backup-import-btn");
+      const backupImportInput = $("backup-import-input");
+      const closePermanentModalBtn = $("close-permanent-modal-btn");
+
+      const joinModal = $("join-modal");
+      const joinAliasInput = $("join-alias-input");
+      const confirmJoinBtn = $("confirm-join-btn");
+
+      const moreMenuModal = $("more-menu-modal");
+      const menuRenameBtn = $("menu-rename-btn");
+      const menuQrBtn = $("menu-qr-btn");
+      const menuMuteBtn = $("menu-mute-btn");
+      const menuBlockBtn = $("menu-block-btn");
+      const menuDeleteBtn = $("menu-delete-btn");
+      const closeMoreMenuBtn = $("close-more-menu-btn");
+
+      const e2eeInfoModal = $("e2ee-info-modal");
+      const closeE2eeModalBtn = $("close-e2ee-modal-btn");
+
+      const incomingCallModal = $("incoming-call-modal");
+      const incomingCallerName = $("incoming-caller-name");
+      const incomingCallTypeLabel = $("incoming-call-type-label");
+      const acceptVideoBtn = $("accept-video-btn");
+      const acceptAudioBtn = $("accept-audio-btn");
+      const rejectCallBtn = $("reject-call-btn");
+
+      const videoModal = $("video-modal");
+      const remoteVideo = $("remote-video");
+      const localVideo = $("local-video");
+      const muteAudioBtn = $("mute-audio-btn");
+      const muteVideoBtn = $("mute-video-btn");
+      const fullscreenVideoBtn = $("fullscreen-video-btn");
+      const hangupCallBtn = $("hangup-call-btn");
+
+      const lightbox = $("lightbox");
+      const lightboxImg = $("lightbox-img");
+
+      /* ---------- Constantes images ---------- */
+      const MAX_IMAGE_DIMENSION = 1280;
+      const MAX_IMAGE_PAYLOAD_BYTES = 2.5 * 1024 * 1024;
+      const IMAGE_CHUNK_SIZE = 64 * 1024;
+      const pendingImages = new Map();
+
+      /* ---------- État ---------- */
+      let soundEnabled = true;
+      let peer = null;
+      let hostId = null;
+      let isGuestMode = false;
+      let guestChannelId = null;
+      let guestInviteToken = null;
+      let guestAlias = "";
+      let guestAccessDenied = false;
+      let guestPendingNotified = false;
+      let activeChannelId = null;
+      let autoReconnectInterval = null;
+
+      let myContacts = [];
+      const activeConnections = {};
+      const remotePeerIds = {};
+      let chatStorage = {};
+      let pendingOutbox = {};
+
+      // QR permanent (côté hôte)
+      let inviteSettings = null;
+      let bannedChannels = [];
+      let recentAutoCreates = [];
+
+      // Appels
+      let currentCall = null;
+      let localMediaStream = null;
+      let isAudioMuted = false;
+      let isVideoMuted = false;
+      let ringtoneInterval = null;
+
+      /* ========================================================
+         UTILITAIRES DE SÉCURITÉ (anti-XSS)
+         ======================================================== */
+      function escapeHtml(value) {
+        return String(value == null ? "" : value)
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;")
+          .replace(/'/g, "&#39;");
+      }
+
+      function sanitizeAlias(value) {
+        return String(value == null ? "" : value)
+          .replace(/[\u0000-\u001f\u007f<>]/g, "")
+          .replace(/\s+/g, " ")
+          .trim()
+          .slice(0, 30);
+      }
+
+      function safeParse(raw, fallback) {
+        if (!raw) return fallback;
+        try { const v = JSON.parse(raw); return v == null ? fallback : v; } catch (e) { return fallback; }
+      }
+
+      function detectEmbeddedWebView() {
+        const ua = navigator.userAgent || navigator.vendor || window.opera;
+        const isEmbedded = /(iPhone|iPod|iPad).*AppleWebKit(?!.*Safari)/i.test(ua) ||
+                           /FBAV|FBAN|Instagram|WeChat|Line/i.test(ua);
+        if (isEmbedded) webviewWarningBanner.style.display = "flex";
+      }
+
+      /* ========================================================
+         1. CHIFFREMENT DES MESSAGES (WEB CRYPTO AES-GCM)
+         ======================================================== */
+      const cryptoKeysCache = {};
+
+      async function getChannelCryptoKey(channelId) {
+        if (cryptoKeysCache[channelId]) return cryptoKeysCache[channelId];
+        if (!window.crypto || !window.crypto.subtle) return null;
+        try {
+          const enc = new TextEncoder();
+          const keyMaterial = await window.crypto.subtle.importKey(
+            "raw",
+            enc.encode(channelId + "-discutons-secret-salt-2026"),
+            { name: "PBKDF2" },
+            false,
+            ["deriveKey"]
+          );
+          const aesKey = await window.crypto.subtle.deriveKey(
+            { name: "PBKDF2", salt: enc.encode("discutons-salt-v2"), iterations: 50000, hash: "SHA-256" },
+            keyMaterial,
+            { name: "AES-GCM", length: 256 },
+            false,
+            ["encrypt", "decrypt"]
+          );
+          cryptoKeysCache[channelId] = aesKey;
+          return aesKey;
+        } catch (e) {
+          console.error("Erreur de génération de clé:", e);
+          return null;
+        }
+      }
+
+      function bytesToBase64(bytes) {
+        let binary = "";
+        const step = 0x8000;
+        for (let i = 0; i < bytes.length; i += step) {
+          binary += String.fromCharCode.apply(null, bytes.subarray(i, i + step));
+        }
+        return btoa(binary);
+      }
+
+      async function encryptPayloadE2EE(channelId, payloadObj) {
+        try {
+          const key = await getChannelCryptoKey(channelId);
+          if (!key) return payloadObj;
+          const iv = window.crypto.getRandomValues(new Uint8Array(12));
+          const ciphertextBuffer = await window.crypto.subtle.encrypt(
+            { name: "AES-GCM", iv },
+            key,
+            new TextEncoder().encode(JSON.stringify(payloadObj))
+          );
+          return { e2ee: true, iv: bytesToBase64(iv), data: bytesToBase64(new Uint8Array(ciphertextBuffer)) };
+        } catch (e) {
+          console.error("Erreur de chiffrement:", e);
+          return payloadObj;
+        }
+      }
+
+      async function decryptPayloadE2EE(channelId, encryptedObj) {
+        if (!encryptedObj || !encryptedObj.e2ee) return encryptedObj;
+        try {
+          const key = await getChannelCryptoKey(channelId);
+          if (!key) return encryptedObj;
+          const ivBytes = Uint8Array.from(atob(encryptedObj.iv), c => c.charCodeAt(0));
+          const cipherBytes = Uint8Array.from(atob(encryptedObj.data), c => c.charCodeAt(0));
+          const decryptedBuffer = await window.crypto.subtle.decrypt({ name: "AES-GCM", iv: ivBytes }, key, cipherBytes);
+          return JSON.parse(new TextDecoder().decode(decryptedBuffer));
+        } catch (e) {
+          console.error("Erreur de déchiffrement:", e);
+          return null;
+        }
+      }
+
+      async function sendEncrypted(channelId, obj) {
+        const conn = activeConnections[channelId];
+        if (!conn || !conn.open) return false;
+        try {
+          conn.send(await encryptPayloadE2EE(channelId, obj));
+          return true;
+        } catch (e) {
+          return false;
+        }
+      }
+
+      e2eeStatusBadge.addEventListener("click", () => { e2eeInfoModal.style.display = "flex"; });
+      closeE2eeModalBtn.addEventListener("click", () => { e2eeInfoModal.style.display = "none"; });
+
+      /* ========================================================
+         2. AUDIO & NOTIFICATIONS
+         ======================================================== */
+      function isChannelMuted(channelId) {
+        if (!soundEnabled) return true;
+        const contact = myContacts.find(c => c.channelId === channelId);
+        return contact && !!contact.isMuted;
+      }
+
+      function playAudioTone(freq1, freq2, duration, channelId = null) {
+        if (channelId && isChannelMuted(channelId)) return;
+        if (!soundEnabled) return;
+        try {
+          const ctx = new (window.AudioContext || window.webkitAudioContext)();
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.type = "sine";
+          osc.frequency.setValueAtTime(freq1, ctx.currentTime);
+          if (freq2) osc.frequency.setValueAtTime(freq2, ctx.currentTime + 0.15);
+          gain.gain.setValueAtTime(0.12, ctx.currentTime);
+          gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + duration);
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.start();
+          osc.stop(ctx.currentTime + duration);
+          osc.onended = () => { try { ctx.close(); } catch (e) {} };
+        } catch (e) {}
+      }
+
+      function soundReceive(channelId) { playAudioTone(587.33, 880, 0.35, channelId); }
+      function soundSend() { playAudioTone(523.25, null, 0.18, null); }
+      function soundPing(channelId) { playAudioTone(880, 1174.66, 0.65, channelId); }
+
+      function startRingtone(channelId) {
+        if (isChannelMuted(channelId)) return;
+        if (ringtoneInterval) clearInterval(ringtoneInterval);
+        playAudioTone(659.25, 880, 0.5, channelId);
+        ringtoneInterval = setInterval(() => playAudioTone(659.25, 880, 0.5, channelId), 1800);
+      }
+
+      function stopRingtone() {
+        if (ringtoneInterval) {
+          clearInterval(ringtoneInterval);
+          ringtoneInterval = null;
+        }
+      }
+
+      soundToggleBtn.addEventListener("click", () => {
+        soundEnabled = !soundEnabled;
+        soundToggleBtn.textContent = soundEnabled ? "🔊" : "🔇";
+        if (activeChannelId) updateMuteButtonState(activeChannelId);
+      });
+
+      function checkNotificationPermission() {
+        if ("Notification" in window && Notification.permission === "default") {
+          notifBanner.style.display = "flex";
+        }
+      }
+
+      enableNotifBtn.addEventListener("click", async () => {
+        if ("Notification" in window) {
+          const perm = await Notification.requestPermission();
+          if (perm === "granted") {
+            notifBanner.style.display = "none";
+            new Notification("🎉 Notifications activées !", {
+              body: "Vous recevrez une alerte lorsque vos contacts souhaitent discuter avec vous."
+            });
+          }
+        }
+      });
+
+      function sendBrowserNotification(title, body) {
+        if ("Notification" in window && Notification.permission === "granted") {
+          try {
+            const notif = new Notification(title, { body, icon: "https://api.iconify.design/twemoji:heart-with-arrow.svg" });
+            notif.onclick = () => { window.focus(); };
+          } catch (e) {}
+        }
+      }
+
+      /* ========================================================
+         3. STOCKAGE LOCAL
+         ======================================================== */
+      function loadLocalStorageData(guestContext) {
+        if (guestContext) {
+          // Stockage séparé côté invité : évite tout mélange si hôte et invité partagent le même navigateur
+          msgKey = "discutons_guest_messages";
+          outboxKey = "discutons_guest_outbox";
+        } else {
+          hostId = localStorage.getItem(KEY_HOST_ID);
+          if (!hostId || !HOST_ID_REGEX.test(hostId)) {
+            hostId = "host-" + generateToken(8);
+            localStorage.setItem(KEY_HOST_ID, hostId);
+          }
+          myContacts = safeParse(localStorage.getItem(KEY_CONTACTS), []);
+          if (!Array.isArray(myContacts)) myContacts = [];
+          bannedChannels = safeParse(localStorage.getItem(KEY_BANNED), []);
+          if (!Array.isArray(bannedChannels)) bannedChannels = [];
+          loadInviteSettings();
+        }
+        chatStorage = safeParse(localStorage.getItem(msgKey), {});
+        pendingOutbox = safeParse(localStorage.getItem(outboxKey), {});
+      }
+
+      function loadInviteSettings() {
+        inviteSettings = safeParse(localStorage.getItem(KEY_INVITE), null);
+        if (!inviteSettings || typeof inviteSettings.token !== "string" || inviteSettings.token.length < 8) {
+          inviteSettings = {
+            token: generateToken(12),
+            enabled: true,
+            requireApproval: false,
+            createdAt: Date.now()
+          };
+          saveInviteSettings();
+        }
+      }
+
+      function saveInviteSettings() {
+        localStorage.setItem(KEY_INVITE, JSON.stringify(inviteSettings));
+      }
+
+      function saveBanned() {
+        if (bannedChannels.length > MAX_BANNED) bannedChannels = bannedChannels.slice(-MAX_BANNED);
+        localStorage.setItem(KEY_BANNED, JSON.stringify(bannedChannels));
+      }
+
+      function banChannel(channelId) {
+        if (!bannedChannels.includes(channelId)) {
+          bannedChannels.push(channelId);
+          saveBanned();
+        }
+      }
+
+      function saveContacts() {
+        if (!isGuestMode) localStorage.setItem(KEY_CONTACTS, JSON.stringify(myContacts));
+        renderSidebar();
+      }
+
+      function saveChatHistory() {
+        try {
+          localStorage.setItem(msgKey, JSON.stringify(chatStorage));
+        } catch (e) {
+          console.warn("Stockage local plein (photos trop nombreuses ?)", e);
+        }
+      }
+
+      function saveOutbox() {
+        try { localStorage.setItem(outboxKey, JSON.stringify(pendingOutbox)); } catch (e) {}
+      }
+
+      function generateToken(size = 8) {
+        const alphabet = "abcdefghjkmnpqrstuvwxyz23456789";
+        const bytes = new Uint8Array(size);
+        crypto.getRandomValues(bytes);
+        return Array.from(bytes, byte => alphabet[byte % alphabet.length]).join("");
+      }
+
+      function currentPageUrlWithoutParams() {
+        return window.location.origin + window.location.pathname;
+      }
+
+      function getGuestThreads() {
+        const t = safeParse(localStorage.getItem(KEY_GUEST_THREADS), {});
+        return (t && typeof t === "object") ? t : {};
+      }
+
+      function saveGuestThreads(threads) {
+        localStorage.setItem(KEY_GUEST_THREADS, JSON.stringify(threads));
+      }
+
+      /* ========================================================
+         4. SIDEBAR & CHAT
+         ======================================================== */
+      function renderSidebar() {
+        if (isGuestMode) {
+          sidebar.style.display = "none";
+          return;
+        }
+
+        contactsList.innerHTML = "";
+        if (myContacts.length === 0) {
+          contactsList.innerHTML = `
+            <div style="padding: 20px; text-align:center; color:var(--muted); font-size:0.86rem;">
+              Aucun fil pour l'instant.<br/>Créez un lien privé ou affichez votre QR code permanent !
+            </div>`;
+          return;
+        }
+
+        myContacts.forEach(contact => {
+          const item = document.createElement("div");
+          const isActive = activeChannelId === contact.channelId;
+          const isBlocked = !!contact.isBlocked;
+          const isMuted = !!contact.isMuted;
+          const isPending = !!contact.isPending && !isBlocked;
+
+          item.className = `contact-item ${isActive ? "active" : ""} ${isBlocked ? "blocked" : ""} ${isPending ? "pending" : ""}`;
+
+          let dotClass = contact.status === "online" ? "online" : (contact.status === "ping" ? "ping" : "");
+          if (isBlocked) dotClass = "blocked";
+
+          const lastMsgList = chatStorage[contact.channelId] || [];
+          const lastMsgText = isBlocked
+            ? "[🚫 Contact bloqué]"
+            : (lastMsgList.length > 0 ? (lastMsgList[lastMsgList.length - 1].text || "[Media]") : "En attente de connexion...");
+
+          const alias = String(contact.alias || "Contact");
+
+          item.innerHTML = `
+            <div class="contact-left">
+              <div class="contact-avatar">
+                ${escapeHtml(alias.charAt(0).toUpperCase())}
+                <span class="status-dot ${dotClass}"></span>
+              </div>
+              <div class="contact-info">
+                <div class="contact-name">
+                  <span style="overflow:hidden;text-overflow:ellipsis;">${escapeHtml(alias)}</span>
+                  ${contact.origin === "qr" ? '<span class="qr-badge" title="Fil créé via votre QR code permanent">📌 QR</span>' : ''}
+                  ${isPending ? '<span class="pending-badge">À valider</span>' : ''}
+                  ${isBlocked ? '<span class="blocked-badge">Bloqué</span>' : ''}
+                  ${!isBlocked && isMuted ? '<span class="muted-badge" title="Sonneries et sons muets">🔕</span>' : ''}
+                </div>
+                <div class="contact-preview">${escapeHtml(lastMsgText)}</div>
+              </div>
+            </div>
+            <div class="contact-right-tools">
+              <span class="badge-unread" style="display: ${!isBlocked && contact.unreadCount > 0 ? "inline-block" : "none"}">
+                ${Number(contact.unreadCount) || 0}
+              </span>
+              <button class="delete-contact-btn" title="Supprimer ce contact" type="button">🗑️</button>
+            </div>`;
+
+          item.addEventListener("click", () => selectChannel(contact.channelId));
+          item.querySelector(".delete-contact-btn").addEventListener("click", e => {
+            e.stopPropagation();
+            deleteContact(contact.channelId);
+          });
+
+          contactsList.appendChild(item);
+        });
+      }
+
+      function showEmptyState() {
+        activeChannelId = null;
+        chatHeader.style.display = "none";
+        messagesContainer.style.display = "none";
+        chatFooter.style.display = "none";
+        approvalBanner.style.display = "none";
+        blockedBanner.style.display = "none";
+        mutedBanner.style.display = "none";
+        offlineBanner.style.display = "none";
+        emptyState.style.display = "flex";
+        sidebar.classList.remove("hidden-mobile");
+        renderSidebar();
+      }
+
+      function closeConnectionWithReason(channelId, reason) {
+        const conn = activeConnections[channelId];
+        if (!conn) return;
+        try { conn.send({ type: "refused", reason }); } catch (e) {}
+        delete activeConnections[channelId];
+        setTimeout(() => { try { conn.close(); } catch (e) {} }, 400);
+      }
+
+      /**
+       * Supprime un fil. Le canal est ajouté à la liste noire :
+       * l'appareil invité ne pourra pas le recréer via le QR permanent.
+       */
+      function deleteContact(channelId, options = {}) {
+        const contact = myContacts.find(c => c.channelId === channelId);
+        if (!contact) return;
+
+        if (!options.skipConfirm) {
+          const confirmDel = confirm(
+            `🗑️ Supprimer définitivement "${contact.alias}" et tout l'historique ?\n\n` +
+            `Action irréversible : ce fil cessera de fonctionner` +
+            (contact.origin === "qr" ? " et cet appareil ne pourra pas le recréer avec le QR permanent." : ".")
+          );
+          if (!confirmDel) return;
+        }
+
+        if (currentCall && activeChannelId === channelId) hangupCall();
+        closeConnectionWithReason(channelId, options.reason || "banned");
+        banChannel(channelId);
+
+        myContacts = myContacts.filter(c => c.channelId !== channelId);
+        delete chatStorage[channelId];
+        delete pendingOutbox[channelId];
+        delete remotePeerIds[channelId];
+
+        saveContacts();
+        saveChatHistory();
+        saveOutbox();
+
+        if (activeChannelId === channelId) {
+          if (myContacts.length > 0) selectChannel(myContacts[0].channelId);
+          else showEmptyState();
+        }
+      }
+
+      deleteChatBtn.addEventListener("click", () => { if (activeChannelId) deleteContact(activeChannelId); });
+
+      function renameContact(channelId) {
+        const contact = myContacts.find(c => c.channelId === channelId);
+        if (!contact) return;
+        const value = prompt(
+          "Nouveau nom pour ce fil (visible uniquement par vous) :" +
+          (contact.guestAlias ? `\n\nPseudo choisi par la personne : ${contact.guestAlias}` : ""),
+          contact.alias
+        );
+        if (value === null) return;
+        const alias = sanitizeAlias(value);
+        if (!alias) return;
+        contact.alias = alias;
+        saveContacts();
+        if (activeChannelId === channelId) selectChannel(channelId);
+      }
+
+      function updateMuteButtonState(channelId) {
+        const contact = myContacts.find(c => c.channelId === channelId);
+        const isMuted = contact ? contact.isMuted : !soundEnabled;
+        if (isMuted || !soundEnabled) {
+          muteContactBtn.textContent = "🔕 Muet";
+          muteContactBtn.title = "Les sonneries et sons sont actuellement désactivés pour ce contact.";
+          mutedBanner.style.display = isGuestMode ? "none" : "flex";
+        } else {
+          muteContactBtn.textContent = "🔊 Son";
+          muteContactBtn.title = "Les sonneries et alertes sonores sont actives.";
+          mutedBanner.style.display = "none";
+        }
+      }
+
+      function toggleMuteContact(channelId) {
+        const contact = myContacts.find(c => c.channelId === channelId);
+        if (!contact) return;
+        contact.isMuted = !contact.isMuted;
+        saveContacts();
+        updateMuteButtonState(channelId);
+        storeAndDisplayMessage(channelId, "system",
+          contact.isMuted ? "🔕 Vous avez coupé les sonneries pour cette conversation." : "🔊 Vous avez réactivé les sonneries pour cette conversation.");
+      }
+
+      muteContactBtn.addEventListener("click", () => { if (activeChannelId) toggleMuteContact(activeChannelId); });
+      unmuteBannerBtn.addEventListener("click", () => { if (activeChannelId) toggleMuteContact(activeChannelId); });
+
+      function setComposerLocked(locked) {
+        chatInput.disabled = locked;
+        sendBtn.disabled = locked;
+        imageBtn.disabled = locked;
+        pingBtn.disabled = locked;
+        videoCallBtn.disabled = locked;
+        audioCallBtn.disabled = locked;
+      }
+
+      function selectChannel(channelId) {
+        activeChannelId = channelId;
+
+        const contact = myContacts.find(c => c.channelId === channelId);
+        const isBlocked = !!(contact && contact.isBlocked);
+        const isPending = !!(contact && contact.isPending && !isBlocked);
+
+        if (contact) {
+          contact.unreadCount = 0;
+          if (contact.status === "ping") {
+            contact.status = activeConnections[channelId] && activeConnections[channelId].open ? "online" : "offline";
+          }
+          saveContacts();
+        }
+
+        emptyState.style.display = "none";
+        chatHeader.style.display = "flex";
+        messagesContainer.style.display = "flex";
+        chatFooter.style.display = "flex";
+
+        updateMuteButtonState(channelId);
+
+        blockedBanner.style.display = isBlocked ? "flex" : "none";
+        approvalBanner.style.display = isPending ? "flex" : "none";
+        if (isBlocked) {
+          blockBtn.textContent = "✅ Débloquer";
+          blockBtn.className = "action-btn success-btn desktop-only-action";
+        } else {
+          blockBtn.textContent = "🚫 Bloquer";
+          blockBtn.className = "action-btn danger-btn desktop-only-action";
+        }
+        setComposerLocked(isBlocked || isPending);
+        chatInput.placeholder = isPending
+          ? "Acceptez ce fil pour pouvoir répondre..."
+          : "Écrire un message chiffré E2EE...";
+
+        const alias = contact ? contact.alias : (isGuestMode ? "L'Hôte" : "Contact");
+        const pseudoInfo = contact && contact.guestAlias && contact.guestAlias !== contact.alias
+          ? `<span class="muted-badge" title="Pseudo choisi par la personne">pseudo : ${escapeHtml(contact.guestAlias)}</span>` : "";
+        activeName.innerHTML =
+          `<span style="overflow:hidden;text-overflow:ellipsis;">${escapeHtml(alias)}</span>` +
+          (contact && contact.origin === "qr" ? ' <span class="qr-badge">📌 QR</span>' : "") +
+          (isPending ? ' <span class="pending-badge">À valider</span>' : "") +
+          (isBlocked ? ' <span class="blocked-badge">Bloqué</span>' : "") +
+          pseudoInfo;
+
+        updateActiveStatusLabel();
+        renderMessages(channelId);
+
+        if (window.innerWidth <= 768) sidebar.classList.add("hidden-mobile");
+
+        flushPendingOutbox(channelId);
+      }
+
+      function updateActiveStatusLabel() {
+        const conn = activeConnections[activeChannelId];
+        const contact = myContacts.find(c => c.channelId === activeChannelId);
+        const isBlocked = contact && contact.isBlocked;
+        const isOnline = conn && conn.open;
+
+        if (contact && !isBlocked) {
+          const newStatus = isOnline ? "online" : (contact.status === "ping" ? "ping" : "offline");
+          if (contact.status !== newStatus) {
+            contact.status = newStatus;
+            saveContacts();
+          }
+        }
+
+        offlineBannerText.innerHTML = isGuestMode
+          ? "⏳ <strong>Hôte hors ligne :</strong> vos messages sont sauvegardés et envoyés dès qu'il se connecte."
+          : "⏳ <strong>Correspondant hors ligne :</strong> vos messages lui seront remis à sa prochaine connexion.";
+        reconnectBtn.style.display = isGuestMode ? "inline-block" : "none";
+
+        if (isBlocked) {
+          activeLed.className = "led blocked";
+          activeStatusLabel.textContent = "Contact Bloqué";
+          offlineBanner.style.display = "none";
+        } else if (isOnline) {
+          activeLed.className = "led online";
+          activeStatusLabel.textContent = "Connecté en direct P2P";
+          offlineBanner.style.display = "none";
+        } else {
+          activeLed.className = "led";
+          activeStatusLabel.textContent = "Hors ligne (en attente)";
+          offlineBanner.style.display = (isGuestMode && guestAccessDenied) ? "none" : "flex";
+        }
+      }
+
+      reconnectBtn.addEventListener("click", () => {
+        if (!activeChannelId) return;
+        storeAndDisplayMessage(activeChannelId, "system", "🔄 Tentative de reconnexion avec l'hôte...");
+        if (isGuestMode) {
+          guestAccessDenied = false;
+          setComposerLocked(false);
+          if (peer && peer.disconnected && !peer.destroyed) peer.reconnect();
+          connectToHostWithRetry(hostId, activeChannelId);
+        } else if (peer && peer.disconnected) {
+          peer.reconnect();
+        }
+      });
+
+      function renderMessages(channelId) {
+        messagesContainer.innerHTML = "";
+        const history = chatStorage[channelId] || [];
+        history.forEach(msg => appendMessageElement(msg.sender, msg.text, msg.mediaUrl, msg.name, msg.timestamp, false));
+        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+      }
+
+      function appendMessageElement(sender, text, mediaUrl, mediaName, timestamp, animate = true) {
+        const msgEl = document.createElement("div");
+        msgEl.className = `message ${sender}`;
+        if (!animate) msgEl.style.animation = "none";
+
+        let authorLabel = "Système";
+        if (sender === "local") authorLabel = "Moi";
+        else if (sender === "remote") authorLabel = isGuestMode ? "L'Hôte" : (myContacts.find(c => c.channelId === activeChannelId)?.alias || "Contact");
+
+        const timeStr = timestamp ? new Date(timestamp).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }) : "";
+
+        if (sender !== "system") {
+          const authorEl = document.createElement("div");
+          authorEl.className = "message-author";
+          const label = document.createElement("span");
+          label.textContent = `${authorLabel} · ${timeStr}`;
+          const lock = document.createElement("span");
+          lock.title = "Message chiffré AES-256";
+          lock.textContent = "🔒";
+          authorEl.append(label, lock);
+          msgEl.appendChild(authorEl);
+        }
+
+        if (mediaUrl && /^data:image\//.test(mediaUrl)) {
+          const mediaBubble = document.createElement("div");
+          mediaBubble.className = "message-bubble media-bubble";
+          const img = document.createElement("img");
+          img.className = "chat-image";
+          img.src = mediaUrl;
+          img.alt = mediaName || "Photo";
+          mediaBubble.addEventListener("click", () => {
+            lightboxImg.src = mediaUrl;
+            lightbox.style.display = "flex";
+          });
+          mediaBubble.appendChild(img);
+          msgEl.appendChild(mediaBubble);
+        } else {
+          const bubble = document.createElement("div");
+          bubble.className = "message-bubble";
+          bubble.textContent = text;
+          msgEl.appendChild(bubble);
+        }
+
+        messagesContainer.appendChild(msgEl);
+        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+      }
+
+      function storeAndDisplayMessage(channelId, sender, text, mediaUrl = null, mediaName = null) {
+        if (!channelId) return;
+        if (!chatStorage[channelId]) chatStorage[channelId] = [];
+        const msgObj = { sender, text, mediaUrl, name: mediaName, timestamp: Date.now() };
+        chatStorage[channelId].push(msgObj);
+        saveChatHistory();
+
+        if (activeChannelId === channelId) {
+          appendMessageElement(sender, text, mediaUrl, mediaName, msgObj.timestamp, true);
+        } else if (sender === "remote") {
+          const contact = myContacts.find(c => c.channelId === channelId);
+          if (contact && !contact.isBlocked) {
+            contact.unreadCount = (contact.unreadCount || 0) + 1;
+          }
+        }
+        if (!isGuestMode) saveContacts(); // rafraîchit l'aperçu dans la sidebar
+      }
+
+      /* ========================================================
+         5. BLOCAGE / DÉBLOCAGE / VALIDATION
+         ======================================================== */
+      function toggleBlockContact(channelId) {
+        const contact = myContacts.find(c => c.channelId === channelId);
+        if (!contact) return;
+
+        if (contact.isBlocked) {
+          contact.isBlocked = false;
+          contact.status = "offline";
+          storeAndDisplayMessage(channelId, "system", "✅ Vous avez débloqué ce contact. Il pourra se reconnecter.");
+        } else {
+          const confirmBlock = confirm(`Bloquer "${contact.alias}" ?\nIl ne pourra plus vous appeler ni vous écrire (vous pourrez le débloquer plus tard).`);
+          if (!confirmBlock) return;
+
+          contact.isBlocked = true;
+          contact.status = "blocked";
+          if (currentCall && activeChannelId === channelId) hangupCall();
+          closeConnectionWithReason(channelId, "blocked");
+          storeAndDisplayMessage(channelId, "system", "🚫 Vous avez bloqué ce contact. Les communications sont coupées.");
+        }
+
+        saveContacts();
+        if (activeChannelId === channelId) selectChannel(channelId);
+      }
+
+      async function approveThread(channelId) {
+        const contact = myContacts.find(c => c.channelId === channelId);
+        if (!contact) return;
+        contact.isPending = false;
+        saveContacts();
+        storeAndDisplayMessage(channelId, "system", "✅ Vous avez accepté ce fil. Vous pouvez maintenant répondre.");
+        await sendEncrypted(channelId, { type: "approved" });
+        if (activeChannelId === channelId) selectChannel(channelId);
+      }
+
+      function rejectThread(channelId) {
+        const contact = myContacts.find(c => c.channelId === channelId);
+        if (!contact) return;
+        const ok = confirm(`Refuser le fil de "${contact.alias}" ?\n\nLe fil sera supprimé et cet appareil ne pourra pas le recréer.`);
+        if (!ok) return;
+        deleteContact(channelId, { skipConfirm: true, reason: "rejected" });
+      }
+
+      blockBtn.addEventListener("click", () => { if (activeChannelId) toggleBlockContact(activeChannelId); });
+      unblockBannerBtn.addEventListener("click", () => { if (activeChannelId) toggleBlockContact(activeChannelId); });
+      approveThreadBtn.addEventListener("click", () => { if (activeChannelId) approveThread(activeChannelId); });
+      rejectThreadBtn.addEventListener("click", () => { if (activeChannelId) rejectThread(activeChannelId); });
+
+      /* ========================================================
+         6. APPELS VIDÉO / AUDIO (WEBRTC)
+         ======================================================== */
+      async function getMediaStream(video = true, audio = true) {
+        try {
+          return await navigator.mediaDevices.getUserMedia({ video: video ? { facingMode: "user" } : false, audio });
+        } catch (err1) {
+          try {
+            return await navigator.mediaDevices.getUserMedia({ video, audio });
+          } catch (err2) {
+            alert(
+              "⚠️ Accès caméra / micro impossible :\n\n" +
+              "1. Si vous avez scanné avec l'appareil photo, ouvrez la page dans SAFARI / CHROME (les navigateurs internes bloquent la caméra).\n" +
+              "2. Vérifiez que la page est en HTTPS et accordez l'autorisation Caméra/Micro."
+            );
+            throw err2;
+          }
+        }
+      }
+
+      async function startOutgoingCall(video = true) {
+        if (!activeChannelId) return;
+        const contact = myContacts.find(c => c.channelId === activeChannelId);
+        if (contact && (contact.isBlocked || contact.isPending)) {
+          alert(contact.isBlocked ? "Impossible d'appeler un contact bloqué." : "Acceptez d'abord ce fil pour pouvoir appeler.");
+          return;
+        }
+
+        const targetPeerId = isGuestMode ? hostId : remotePeerIds[activeChannelId];
+        const conn = activeConnections[activeChannelId];
+        if (!targetPeerId || !conn || !conn.open) {
+          alert("Le contact n'est pas connecté en ce moment.\nL'appel sera possible dès qu'il ouvrira la conversation.");
+          return;
+        }
+
+        try {
+          localMediaStream = await getMediaStream(video, true);
+          localVideo.srcObject = localMediaStream;
+          localVideo.style.display = video ? "block" : "none";
+
+          storeAndDisplayMessage(activeChannelId, "system", `🎥 Lancement de l'appel ${video ? "vidéo" : "audio"} chiffré DTLS-SRTP...`);
+          soundPing(activeChannelId);
+
+          const call = peer.call(targetPeerId, localMediaStream, {
+            metadata: {
+              channel: activeChannelId,
+              video,
+              callerName: isGuestMode ? (guestAlias || "Invité") : "L'Hôte"
+            }
+          });
+
+          setupCallHandlers(call, video);
+          videoModal.style.display = "flex";
+        } catch (err) {
+          console.error("Erreur de média:", err);
+        }
+      }
+
+      videoCallBtn.addEventListener("click", () => startOutgoingCall(true));
+      audioCallBtn.addEventListener("click", () => startOutgoingCall(false));
+
+      function setupCallHandlers(call, video) {
+        currentCall = call;
+        const callChannel = activeChannelId;
+
+        call.on("stream", remoteStream => {
+          remoteVideo.srcObject = remoteStream;
+          storeAndDisplayMessage(callChannel, "system", "🟢 Appel en cours, flux connecté en direct !");
+        });
+        call.on("close", () => {
+          if (currentCall !== call) return;
+          cleanupCall();
+          storeAndDisplayMessage(callChannel, "system", "🔴 Appel terminé.");
+        });
+        call.on("error", err => {
+          console.error("Erreur durant l'appel WebRTC:", err);
+          cleanupCall();
+          storeAndDisplayMessage(callChannel, "system", "⚠️ Erreur durant la communication vidéo.");
+        });
+      }
+
+      function handleIncomingCall(call) {
+        const chId = call.metadata ? call.metadata.channel : null;
+        const isVideoRequest = call.metadata ? call.metadata.video !== false : true;
+
+        if (isGuestMode) {
+          // L'invité n'accepte que les appels de SON hôte, sur SON fil
+          if (call.peer !== hostId || chId !== guestChannelId) { call.close(); return; }
+        } else {
+          const contact = myContacts.find(c => c.channelId === chId);
+          // Contrôle hôte : inconnu, bloqué ou non validé => rejet ; et l'appelant doit être le pair de ce fil
+          if (!contact || contact.isBlocked || contact.isPending || (remotePeerIds[chId] && remotePeerIds[chId] !== call.peer)) {
+            call.close();
+            return;
+          }
+        }
+
+        if (currentCall) { call.close(); return; } // déjà en appel
+
+        const contact = myContacts.find(c => c.channelId === chId);
+        incomingCallerName.textContent = isGuestMode ? "L'Hôte" : (contact?.alias || "Un contact");
+        incomingCallTypeLabel.textContent = isVideoRequest
+          ? "Souhaite démarrer un appel vidéo chiffré avec vous !"
+          : "Souhaite démarrer un appel vocal chiffré avec vous !";
+
+        if (!isGuestMode && activeChannelId !== chId) selectChannel(chId);
+
+        startRingtone(chId);
+        incomingCallModal.style.display = "flex";
+
+        const answerWith = async (withVideo) => {
+          stopRingtone();
+          incomingCallModal.style.display = "none";
+          try {
+            localMediaStream = await getMediaStream(withVideo, true);
+            localVideo.srcObject = localMediaStream;
+            localVideo.style.display = withVideo ? "block" : "none";
+            call.answer(localMediaStream);
+            setupCallHandlers(call, withVideo);
+            videoModal.style.display = "flex";
+          } catch (e) {
+            call.close();
+          }
+        };
+
+        acceptVideoBtn.onclick = () => answerWith(true);
+        acceptAudioBtn.onclick = () => answerWith(false);
+        rejectCallBtn.onclick = () => {
+          stopRingtone();
+          incomingCallModal.style.display = "none";
+          call.close();
+          storeAndDisplayMessage(chId || activeChannelId, "system", "🔴 Vous avez décliné l'appel entrant.");
+        };
+        call.on("close", () => {
+          if (incomingCallModal.style.display === "flex") {
+            stopRingtone();
+            incomingCallModal.style.display = "none";
+          }
+        });
+      }
+
+      function hangupCall() {
+        const ch = activeChannelId;
+        const call = currentCall;
+        cleanupCall();
+        if (call) { try { call.close(); } catch (e) {} }
+        storeAndDisplayMessage(ch, "system", "🔴 Appel terminé.");
+      }
+
+      function cleanupCall() {
+        if (localMediaStream) {
+          localMediaStream.getTracks().forEach(track => track.stop());
+          localMediaStream = null;
+        }
+        remoteVideo.srcObject = null;
+        localVideo.srcObject = null;
+        currentCall = null;
+        videoModal.style.display = "none";
+        isAudioMuted = false;
+        isVideoMuted = false;
+        muteAudioBtn.style.background = "rgba(255,255,255,0.12)";
+        muteVideoBtn.style.background = "rgba(255,255,255,0.12)";
+        muteAudioBtn.textContent = "🎤";
+        muteVideoBtn.textContent = "📷";
+      }
+
+      hangupCallBtn.addEventListener("click", hangupCall);
+
+      muteAudioBtn.addEventListener("click", () => {
+        if (!localMediaStream) return;
+        const tracks = localMediaStream.getAudioTracks();
+        if (tracks.length > 0) {
+          isAudioMuted = !isAudioMuted;
+          tracks[0].enabled = !isAudioMuted;
+          muteAudioBtn.style.background = isAudioMuted ? "var(--danger)" : "rgba(255,255,255,0.12)";
+          muteAudioBtn.textContent = isAudioMuted ? "🔇" : "🎤";
+        }
+      });
+
+      muteVideoBtn.addEventListener("click", () => {
+        if (!localMediaStream) return;
+        const tracks = localMediaStream.getVideoTracks();
+        if (tracks.length > 0) {
+          isVideoMuted = !isVideoMuted;
+          tracks[0].enabled = !isVideoMuted;
+          muteVideoBtn.style.background = isVideoMuted ? "var(--danger)" : "rgba(255,255,255,0.12)";
+          muteVideoBtn.textContent = isVideoMuted ? "🚫" : "📷";
+        }
+      });
+
+      fullscreenVideoBtn.addEventListener("click", () => {
+        const elem = videoModal.querySelector(".video-container");
+        if (elem.requestFullscreen) elem.requestFullscreen();
+        else if (elem.webkitRequestFullscreen) elem.webkitRequestFullscreen();
+      });
+
+      /* ========================================================
+         7. RÉSEAU P2P
+         ======================================================== */
+      function rejectIncomingConnection(conn, reason) {
+        conn.on("open", () => {
+          try { conn.send({ type: "refused", reason }); } catch (e) {}
+          setTimeout(() => { try { conn.close(); } catch (e) {} }, 400);
+        });
+      }
+
+      /**
+       * Création automatique d'un fil par un invité ayant scanné le QR permanent.
+       * C'est ICI que l'hôte garde la main : QR actif ? jeton valide ? fil banni ? anti-spam ? validation ?
+       */
+      function createThreadFromInvite(channelId, meta) {
+        if (bannedChannels.includes(channelId)) return { ok: false, reason: "banned" };
+        if (!inviteSettings || !inviteSettings.enabled) return { ok: false, reason: "invite-disabled" };
+        if (meta.invite !== inviteSettings.token) return { ok: false, reason: "invite-invalid" };
+
+        const now = Date.now();
+        recentAutoCreates = recentAutoCreates.filter(t => now - t < 60000);
+        if (recentAutoCreates.length >= MAX_AUTO_CREATES_PER_MINUTE) return { ok: false, reason: "rate-limit" };
+        recentAutoCreates.push(now);
+
+        const pseudo = sanitizeAlias(meta.alias) || "Invité";
+        const contact = {
+          channelId,
+          alias: pseudo,
+          guestAlias: pseudo,
+          origin: "qr",
+          createdAt: now,
+          unreadCount: 1,
+          status: "offline",
+          isBlocked: false,
+          isMuted: false,
+          isPending: !!inviteSettings.requireApproval
+        };
+        myContacts.unshift(contact);
+        saveContacts();
+
+        storeAndDisplayMessage(channelId, "system", contact.isPending
+          ? `🆕 ${pseudo} a créé ce fil via votre QR code permanent. Il attend votre validation.`
+          : `🆕 ${pseudo} a créé ce fil via votre QR code permanent.`);
+
+        soundPing(channelId);
+        sendBrowserNotification("🆕 Nouveau fil de discussion", `${pseudo} a démarré une discussion via votre QR code permanent.`);
+
+        if (!activeChannelId) selectChannel(channelId);
+        return { ok: true, contact };
+      }
+
+      function initPeerNetwork() {
+        if (typeof Peer === "undefined") {
+          alert("Erreur : PeerJS introuvable. Vérifiez votre connexion Internet.");
+          return;
+        }
+
+        if (isGuestMode) {
+          peer = new Peer(undefined, PEER_OPTIONS);
+          peer.on("open", () => connectToHostWithRetry(hostId, guestChannelId));
+          peer.on("call", handleIncomingCall);
+          peer.on("disconnected", () => {
+            setTimeout(() => { if (!peer.destroyed) peer.reconnect(); }, 3000);
+          });
+          peer.on("error", err => {
+            if (err && err.type !== "peer-unavailable") console.error("Erreur Peer Invité:", err);
+          });
+        } else {
+          peer = new Peer(hostId, PEER_OPTIONS);
+          peer.on("open", id => console.log("Hôte à l'écoute sur l'ID:", id));
+
+          peer.on("connection", incomingConn => {
+            const meta = incomingConn.metadata || {};
+            const chId = typeof meta.channel === "string" ? meta.channel : null;
+            if (!chId || !CHANNEL_ID_REGEX.test(chId)) {
+              rejectIncomingConnection(incomingConn, "invalid");
+              return;
+            }
+
+            let contact = myContacts.find(c => c.channelId === chId);
+
+            if (!contact && typeof meta.invite === "string") {
+              const result = createThreadFromInvite(chId, meta);
+              if (!result.ok) {
+                console.warn("Création de fil refusée:", result.reason, chId);
+                rejectIncomingConnection(incomingConn, result.reason);
+                return;
+              }
+              contact = result.contact;
+            }
+
+            if (!contact || contact.isBlocked) {
+              rejectIncomingConnection(incomingConn, contact ? "blocked" : "banned");
+              return;
+            }
+
+            // Mise à jour du pseudo choisi par l'invité (le nom donné par l'hôte est conservé)
+            if (contact.origin === "qr" && typeof meta.alias === "string") {
+              const pseudo = sanitizeAlias(meta.alias);
+              if (pseudo && pseudo !== contact.guestAlias) {
+                contact.guestAlias = pseudo;
+                saveContacts();
+              }
+            }
+
+            setupConnection(incomingConn, chId);
+          });
+
+          peer.on("call", handleIncomingCall);
+          peer.on("disconnected", () => {
+            setTimeout(() => { if (!peer.destroyed) peer.reconnect(); }, 3000);
+          });
+          peer.on("error", err => {
+            console.error("Erreur Peer Hôte:", err);
+            if (err && err.type === "unavailable-id") {
+              alert(
+                "⚠️ Votre identifiant d'hôte est déjà actif ailleurs (autre onglet ou autre appareil).\n\n" +
+                "Un seul appareil hôte peut recevoir les fils à la fois : fermez l'autre session puis rechargez cette page."
+              );
+            }
+          });
+        }
+      }
+
+      function guestConnMetadata(channelId) {
+        const meta = { channel: channelId };
+        if (guestInviteToken) meta.invite = guestInviteToken;
+        if (guestAlias) meta.alias = guestAlias;
+        return meta;
+      }
+
+      function connectToHostWithRetry(targetHostId, channelId) {
+        if (guestAccessDenied) return;
+        if (!peer || peer.destroyed) return;
+        if (activeConnections[channelId] && activeConnections[channelId].open) return;
+
+        const conn = peer.connect(targetHostId, { reliable: true, metadata: guestConnMetadata(channelId) });
+        setupConnection(conn, channelId);
+
+        if (!autoReconnectInterval) {
+          autoReconnectInterval = setInterval(() => {
+            if (guestAccessDenied) return;
+            if (!activeConnections[channelId] || !activeConnections[channelId].open) {
+              if (peer.disconnected || peer.destroyed) return;
+              const retryConn = peer.connect(targetHostId, { reliable: true, metadata: guestConnMetadata(channelId) });
+              setupConnection(retryConn, channelId);
+            } else {
+              flushPendingOutbox(channelId);
+            }
+          }, 8000);
+        }
+      }
+
+      function handleGuestAccessDenied(channelId, reason) {
+        const messages = {
+          blocked: "🚫 L'hôte a fermé ou bloqué cette conversation.",
+          banned: "🚫 Cette conversation a été supprimée par l'hôte.",
+          rejected: "🚫 L'hôte n'a pas accepté cette conversation.",
+          "invite-disabled": "⛔ Ce QR code n'accepte plus de nouvelles discussions pour le moment.",
+          "invite-invalid": "⛔ Ce QR code a été révoqué par l'hôte. Demandez-lui le nouveau.",
+          "rate-limit": "⏳ Trop de nouvelles discussions en même temps, nouvel essai automatique dans un instant...",
+          invalid: "⛔ Lien de discussion invalide."
+        };
+        const text = messages[reason] || messages.blocked;
+
+        if (reason === "rate-limit") {
+          storeAndDisplayMessage(channelId, "system", text);
+          return; // on laisse la reconnexion automatique réessayer
+        }
+        if (guestAccessDenied) return;
+        guestAccessDenied = true;
+        storeAndDisplayMessage(channelId, "system", text);
+        setComposerLocked(true);
+        chatInput.placeholder = "Conversation fermée par l'hôte";
+        offlineBanner.style.display = "none";
+      }
+
+      function setupConnection(conn, channelId) {
+        activeConnections[channelId] = conn;
+
+        conn.on("open", () => {
+          if (activeConnections[channelId] !== conn) activeConnections[channelId] = conn;
+          remotePeerIds[channelId] = conn.peer;
+
+          const contact = myContacts.find(c => c.channelId === channelId);
+          if (contact && !contact.isBlocked) {
+            contact.status = "online";
+            saveContacts();
+          }
+          if (activeChannelId === channelId) updateActiveStatusLabel();
+
+          if (!chatStorage[channelId] || !chatStorage[channelId].some(m => m.sender !== "system")) {
+            if (!(chatStorage[channelId] || []).some(m => m.text && m.text.startsWith("🔒 Canal privé"))) {
+              storeAndDisplayMessage(channelId, "system", "🔒 Canal privé 1-à-1 connecté en direct ! Chiffrement AES-256 et DTLS-SRTP actifs.");
+            }
+          }
+
+          if (!isGuestMode && contact && contact.isPending) {
+            sendEncrypted(channelId, { type: "pending" });
+          }
+
+          flushPendingOutbox(channelId);
+        });
+
+        conn.on("data", async encryptedData => {
+          if (!encryptedData) return;
+
+          const contact = myContacts.find(c => c.channelId === channelId);
+          if (!isGuestMode && (!contact || contact.isBlocked)) {
+            conn.close();
+            return;
+          }
+
+          const data = await decryptPayloadE2EE(channelId, encryptedData);
+          if (!data || typeof data !== "object") return;
+
+          // Messages de contrôle envoyés par l'hôte (non sensibles, non chiffrés)
+          if (data.type === "blocked" || data.type === "refused") {
+            if (isGuestMode) handleGuestAccessDenied(channelId, data.reason || "blocked");
+            try { conn.close(); } catch (e) {}
+            return;
+          }
+
+          if (isGuestMode && data.type === "pending") {
+            if (!guestPendingNotified && !(chatStorage[channelId] || []).some(m => m.text && m.text.startsWith("⏳ Votre fil"))) {
+              storeAndDisplayMessage(channelId, "system", "⏳ Votre fil est bien créé. L'hôte doit le valider avant de pouvoir vous répondre ; vous pouvez déjà écrire.");
+            }
+            guestPendingNotified = true;
+            return;
+          }
+
+          if (isGuestMode && data.type === "approved") {
+            storeAndDisplayMessage(channelId, "system", "✅ L'hôte a accepté votre fil de discussion !");
+            soundPing(channelId);
+            return;
+          }
+
+          if (data.type === "message" && typeof data.text === "string") {
+            const text = data.text.slice(0, 2000);
+            storeAndDisplayMessage(channelId, "remote", text);
+            soundReceive(channelId);
+            const from = isGuestMode ? "L'Hôte" : (contact?.alias || "Contact");
+            sendBrowserNotification(`Nouveau message de ${from}`, text);
+          }
+
+          if (data.type === "ping") {
+            soundPing(channelId);
+            const senderName = isGuestMode ? "L'Hôte" : (contact?.alias || "Un contact");
+            storeAndDisplayMessage(channelId, "system", `🔔 ${senderName} souhaite discuter avec vous maintenant !`);
+            sendBrowserNotification("🔔 Demande de discussion en direct !", `${senderName} aimerait discuter avec vous.`);
+            if (activeChannelId !== channelId && contact) {
+              contact.status = "ping";
+              contact.unreadCount = (contact.unreadCount || 0) + 1;
+              saveContacts();
+            }
+          }
+
+          if (data.type === "image" && typeof data.dataUrl === "string" && /^data:image\//.test(data.dataUrl)) {
+            storeAndDisplayMessage(channelId, "remote", `[Photo : ${data.name}]`, data.dataUrl, data.name);
+            soundReceive(channelId);
+            sendBrowserNotification("Photo reçue", "Une nouvelle photo vous a été envoyée.");
+          }
+
+          if (data.type === "image-meta") receiveImageMeta(data, channelId);
+          if (data.type === "image-chunk") receiveImageChunk(data, channelId);
+
+          if (data.type === "typing" && activeChannelId === channelId) {
+            typingBadge.style.display = "inline-block";
+            setTimeout(() => { typingBadge.style.display = "none"; }, 2000);
+          }
+        });
+
+        conn.on("close", () => {
+          if (activeConnections[channelId] === conn) delete activeConnections[channelId];
+          const contact = myContacts.find(c => c.channelId === channelId);
+          if (contact && !contact.isBlocked) {
+            contact.status = "offline";
+            saveContacts();
+          }
+          if (activeChannelId === channelId) updateActiveStatusLabel();
+        });
+
+        conn.on("error", err => console.error("Erreur de connexion sur", channelId, err));
+      }
+
+      async function flushPendingOutbox(channelId) {
+        const conn = activeConnections[channelId];
+        if (!conn || !conn.open) return;
+        const queue = pendingOutbox[channelId] || [];
+        if (queue.length === 0) return;
+
+        const remaining = [];
+        for (const item of queue) {
+          try { conn.send(item.payload); } catch (err) { remaining.push(item); }
+        }
+        if (remaining.length === 0) delete pendingOutbox[channelId];
+        else pendingOutbox[channelId] = remaining;
+        saveOutbox();
+      }
+
+      async function sendMessage() {
+        const text = chatInput.value.trim();
+        if (!text || !activeChannelId) return;
+
+        const contact = myContacts.find(c => c.channelId === activeChannelId);
+        if (contact && (contact.isBlocked || contact.isPending)) return;
+        if (isGuestMode && guestAccessDenied) return;
+
+        const payload = await encryptPayloadE2EE(activeChannelId, { type: "message", text, timestamp: Date.now() });
+        const conn = activeConnections[activeChannelId];
+
+        storeAndDisplayMessage(activeChannelId, "local", text);
+
+        if (conn && conn.open) {
+          conn.send(payload);
+        } else {
+          if (!pendingOutbox[activeChannelId]) pendingOutbox[activeChannelId] = [];
+          pendingOutbox[activeChannelId].push({ payload, text, timestamp: Date.now() });
+          saveOutbox();
+          storeAndDisplayMessage(activeChannelId, "system",
+            isGuestMode ? "⏳ Message en attente : il sera remis dès que l'hôte sera en ligne."
+                        : "⏳ Message en attente : il sera remis à la prochaine connexion du correspondant.");
+        }
+
+        soundSend();
+        chatInput.value = "";
+      }
+
+      async function sendPingAlert() {
+        if (!activeChannelId) return;
+        const contact = myContacts.find(c => c.channelId === activeChannelId);
+        if (contact && (contact.isBlocked || contact.isPending)) return;
+        if (await sendEncrypted(activeChannelId, { type: "ping", timestamp: Date.now() })) {
+          storeAndDisplayMessage(activeChannelId, "system", "🔔 Alerte envoyée au contact en direct !");
+          soundPing(activeChannelId);
+        } else {
+          alert("Le contact n'est pas connecté en ce moment.\nVos messages écrits lui seront remis à sa prochaine connexion.");
+        }
+      }
+
+      let lastTypingSent = 0;
+      chatInput.addEventListener("input", () => {
+        const now = Date.now();
+        if (activeChannelId && now - lastTypingSent > 1500) {
+          lastTypingSent = now;
+          sendEncrypted(activeChannelId, { type: "typing" });
+        }
+      });
+
+      /* GESTION MEDIA */
+      function bytesFromDataUrl(dataUrl) {
+        const base64 = String(dataUrl).split(",")[1] || "";
+        return Math.ceil(base64.length * 0.75);
+      }
+      function blobToDataUrl(blob) {
+        return new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result);
+          reader.onerror = () => reject(new Error("Erreur lecture image"));
+          reader.readAsDataURL(blob);
+        });
+      }
+      function canvasToBlob(canvas, type, quality) {
+        return new Promise((resolve, reject) => {
+          canvas.toBlob(blob => (blob ? resolve(blob) : reject(new Error("Erreur compression"))), type, quality);
+        });
+      }
+
+      async function prepareImage(file) {
+        const sourceUrl = URL.createObjectURL(file);
+        try {
+          const image = new Image();
+          image.decoding = "async";
+          await new Promise((resolve, reject) => {
+            image.onload = resolve;
+            image.onerror = reject;
+            image.src = sourceUrl;
+          });
+          const ratio = Math.min(1, MAX_IMAGE_DIMENSION / Math.max(image.naturalWidth, image.naturalHeight));
+          const width = Math.max(1, Math.round(image.naturalWidth * ratio));
+          const height = Math.max(1, Math.round(image.naturalHeight * ratio));
+          const canvas = document.createElement("canvas");
+          canvas.width = width;
+          canvas.height = height;
+          canvas.getContext("2d").drawImage(image, 0, 0, width, height);
+          let quality = 0.82;
+          let blob = await canvasToBlob(canvas, "image/jpeg", quality);
+          while (blob.size > MAX_IMAGE_PAYLOAD_BYTES && quality > 0.48) {
+            quality -= 0.12;
+            blob = await canvasToBlob(canvas, "image/jpeg", quality);
+          }
+          return { type: "image", name: sanitizeAlias(file.name) || "photo.jpg", mime: "image/jpeg", dataUrl: await blobToDataUrl(blob) };
+        } finally {
+          URL.revokeObjectURL(sourceUrl);
+        }
+      }
+
+      async function sendImage(file) {
+        if (!file || !activeChannelId) return;
+        const conn = activeConnections[activeChannelId];
+        if (!conn || !conn.open) {
+          alert("Impossible d'envoyer la photo : le contact n'est pas connecté en direct.");
+          imageInput.value = "";
+          return;
+        }
+        try {
+          imageBtn.disabled = true;
+          const imageMsg = await prepareImage(file);
+          const payloadSize = bytesFromDataUrl(imageMsg.dataUrl);
+          const transferId = "img-" + generateToken(10);
+          const total = Math.ceil(imageMsg.dataUrl.length / IMAGE_CHUNK_SIZE);
+
+          conn.send(await encryptPayloadE2EE(activeChannelId, {
+            type: "image-meta", id: transferId, name: imageMsg.name, mime: imageMsg.mime, total, size: payloadSize
+          }));
+
+          for (let idx = 0; idx < total; idx++) {
+            const chunk = imageMsg.dataUrl.slice(idx * IMAGE_CHUNK_SIZE, (idx + 1) * IMAGE_CHUNK_SIZE);
+            conn.send(await encryptPayloadE2EE(activeChannelId, { type: "image-chunk", id: transferId, index: idx, chunk }));
+            if (idx % 6 === 0) await new Promise(r => setTimeout(r, 0));
+          }
+
+          storeAndDisplayMessage(activeChannelId, "local", `[Photo : ${imageMsg.name}]`, imageMsg.dataUrl, imageMsg.name);
+          soundSend();
+        } catch (e) {
+          alert("Erreur envoi image : " + e.message);
+        } finally {
+          imageBtn.disabled = false;
+          imageInput.value = "";
+        }
+      }
+
+      function receiveImageMeta(data, channelId) {
+        const total = Number(data.total);
+        if (!Number.isInteger(total) || total < 1 || total > 80) return; // garde-fou anti-abus (~5 Mo max)
+        pendingImages.set(String(data.id), {
+          channelId,
+          name: sanitizeAlias(data.name) || "photo.jpg",
+          total,
+          chunks: new Array(total),
+          received: 0
+        });
+      }
+
+      function receiveImageChunk(data, channelId) {
+        const pending = pendingImages.get(String(data.id));
+        if (!pending || pending.channelId !== channelId) return;
+        const index = Number(data.index);
+        if (!Number.isInteger(index) || index < 0 || index >= pending.total || typeof data.chunk !== "string") return;
+        if (!pending.chunks[index]) {
+          pending.chunks[index] = data.chunk;
+          pending.received++;
+        }
+        if (pending.received === pending.total) {
+          const dataUrl = pending.chunks.join("");
+          pendingImages.delete(String(data.id));
+          if (!/^data:image\//.test(dataUrl)) return;
+          storeAndDisplayMessage(channelId, "remote", `[Photo : ${pending.name}]`, dataUrl, pending.name);
+          soundReceive(channelId);
+          sendBrowserNotification("Photo reçue", "Une nouvelle photo vous a été envoyée.");
+        }
+      }
+
+      /* ========================================================
+         8. QR CODES : LIEN INDIVIDUEL + QR PERMANENT
+         ======================================================== */
+      function renderQRCode(container, url, size = 220, level = "M") {
+        container.innerHTML = "";
+        try {
+          if (typeof QRCode !== "undefined") {
+            new QRCode(container, {
+              text: url,
+              width: size,
+              height: size,
+              colorDark: "#000000",
+              colorLight: "#ffffff",
+              correctLevel: QRCode.CorrectLevel[level] || QRCode.CorrectLevel.M
+            });
+            return;
+          }
+        } catch (e) {
+          container.innerHTML = "";
+        }
+        const img = document.createElement("img");
+        img.alt = "QR Code";
+        img.src = `https://api.qrserver.com/v1/create-qr-code/?size=${size}x${size}&margin=15&data=${encodeURIComponent(url)}`;
+        container.appendChild(img);
+      }
+
+      async function copyText(text, button, label) {
+        try {
+          await navigator.clipboard.writeText(text);
+          button.textContent = "✅ Lien copié !";
+          setTimeout(() => { button.textContent = label; }, 1800);
+        } catch {
+          prompt("Copiez ce lien :", text);
+        }
+      }
+
+      function openCreateModal() {
+        contactAliasInput.value = "";
+        createModal.style.display = "flex";
+        contactAliasInput.focus();
+      }
+
+      newLinkBtn.addEventListener("click", openCreateModal);
+      emptyCreateBtn.addEventListener("click", openCreateModal);
+      closeModalBtn.addEventListener("click", () => { createModal.style.display = "none"; });
+
+      confirmCreateBtn.addEventListener("click", () => {
+        const alias = sanitizeAlias(contactAliasInput.value) || "Contact #" + (myContacts.length + 1);
+        const channelId = "c-" + generateToken(8);
+        myContacts.unshift({
+          channelId,
+          alias,
+          origin: "manual",
+          createdAt: Date.now(),
+          unreadCount: 0,
+          status: "offline",
+          isBlocked: false,
+          isMuted: false,
+          isPending: false
+        });
+        saveContacts();
+        createModal.style.display = "none";
+        selectChannel(channelId);
+        openShareModal(channelId, alias);
+      });
+
+      function openShareModal(channelId, aliasName) {
+        const url = `${currentPageUrlWithoutParams()}?host=${encodeURIComponent(hostId)}&channel=${encodeURIComponent(channelId)}`;
+        shareModalName.textContent = aliasName;
+        secretLinkDisplay.textContent = url;
+        renderQRCode(qrcodeBox, url, 220, "H");
+
+        if (navigator.share) {
+          nativeShareBtn.style.display = "inline-block";
+          nativeShareBtn.onclick = async () => {
+            try {
+              await navigator.share({ title: "Rejoins ma conversation privée", text: "Ouvre ce lien secret pour discuter avec moi.", url });
+            } catch (e) {}
+          };
+        } else {
+          nativeShareBtn.style.display = "none";
+        }
+        copyShareBtn.onclick = () => copyText(url, copyShareBtn, "📋 Copier le lien");
+        shareModal.style.display = "flex";
+      }
+
+      shareActiveBtn.addEventListener("click", () => {
+        if (!activeChannelId) return;
+        const contact = myContacts.find(c => c.channelId === activeChannelId);
+        openShareModal(activeChannelId, contact ? contact.alias : "Contact");
+      });
+      closeShareModalBtn.addEventListener("click", () => { shareModal.style.display = "none"; });
+
+      /* ---------- QR PERMANENT ---------- */
+      function permanentUrl() {
+        return `${currentPageUrlWithoutParams()}?host=${encodeURIComponent(hostId)}&invite=${encodeURIComponent(inviteSettings.token)}`;
+      }
+
+      function updatePermanentStatus() {
+        const qrThreads = myContacts.filter(c => c.origin === "qr").length;
+        const pending = myContacts.filter(c => c.origin === "qr" && c.isPending && !c.isBlocked).length;
+        if (inviteSettings.enabled) {
+          permanentStatus.className = "permanent-status on";
+          permanentStatus.textContent = `🟢 Actif · ${qrThreads} fil(s) créé(s)` + (pending ? ` · ${pending} à valider` : "");
+        } else {
+          permanentStatus.className = "permanent-status off";
+          permanentStatus.textContent = `⏸️ En pause · aucun nouveau fil accepté (${qrThreads} existant(s))`;
+        }
+      }
+
+      function openPermanentModal() {
+        const url = permanentUrl();
+        permanentLinkDisplay.textContent = url;
+        renderQRCode(permanentQrBox, url, 220, "M");
+        inviteEnabledToggle.checked = !!inviteSettings.enabled;
+        inviteApprovalToggle.checked = !!inviteSettings.requireApproval;
+        updatePermanentStatus();
+
+        if (navigator.share) {
+          permanentShareBtn.style.display = "inline-block";
+          permanentShareBtn.onclick = async () => {
+            try {
+              await navigator.share({ title: "Discutons en privé", text: "Ouvre ce lien pour démarrer une discussion privée avec moi.", url });
+            } catch (e) {}
+          };
+        } else {
+          permanentShareBtn.style.display = "none";
+        }
+        permanentModal.style.display = "flex";
+      }
+
+      permanentQrBtn.addEventListener("click", openPermanentModal);
+      emptyPermanentBtn.addEventListener("click", openPermanentModal);
+      closePermanentModalBtn.addEventListener("click", () => { permanentModal.style.display = "none"; });
+      permanentCopyBtn.addEventListener("click", () => copyText(permanentUrl(), permanentCopyBtn, "📋 Copier le lien"));
+
+      inviteEnabledToggle.addEventListener("change", () => {
+        inviteSettings.enabled = inviteEnabledToggle.checked;
+        saveInviteSettings();
+        updatePermanentStatus();
+      });
+      inviteApprovalToggle.addEventListener("change", () => {
+        inviteSettings.requireApproval = inviteApprovalToggle.checked;
+        saveInviteSettings();
+      });
+
+      permanentRegenBtn.addEventListener("click", () => {
+        const ok = confirm(
+          "🔄 Révoquer le QR code permanent actuel ?\n\n" +
+          "• L'ancien QR (déjà imprimé / partagé) ne permettra PLUS de créer de nouveaux fils.\n" +
+          "• Les fils déjà existants continuent de fonctionner normalement.\n" +
+          "• Un nouveau QR code sera généré."
+        );
+        if (!ok) return;
+        inviteSettings.token = generateToken(12);
+        inviteSettings.createdAt = Date.now();
+        saveInviteSettings();
+        openPermanentModal();
+      });
+
+      function downloadPermanentQr() {
+        const url = permanentUrl();
+        if (typeof QRCode === "undefined") {
+          window.open(`https://api.qrserver.com/v1/create-qr-code/?size=1000x1000&margin=40&data=${encodeURIComponent(url)}`, "_blank");
+          return;
+        }
+        try {
+          const tmp = document.createElement("div");
+          new QRCode(tmp, { text: url, width: 800, height: 800, colorDark: "#000000", colorLight: "#ffffff", correctLevel: QRCode.CorrectLevel.M });
+          const qrCanvas = tmp.querySelector("canvas");
+          if (!qrCanvas) throw new Error("canvas indisponible");
+
+          const pad = 80, qr = 800, W = qr + pad * 2, H = qr + pad * 2 + 120;
+          const out = document.createElement("canvas");
+          out.width = W;
+          out.height = H;
+          const ctx = out.getContext("2d");
+          ctx.fillStyle = "#ffffff";
+          ctx.fillRect(0, 0, W, H);
+          ctx.imageSmoothingEnabled = false;
+          ctx.drawImage(qrCanvas, pad, pad, qr, qr);
+          ctx.textAlign = "center";
+          ctx.fillStyle = "#1a0b20";
+          ctx.font = "bold 46px -apple-system, 'Segoe UI', Roboto, Arial, sans-serif";
+          ctx.fillText("Scannez pour discuter en privé", W / 2, qr + pad + 85);
+          ctx.fillStyle = "#7a5a74";
+          ctx.font = "28px -apple-system, 'Segoe UI', Roboto, Arial, sans-serif";
+          ctx.fillText("Votre propre fil · messages chiffrés", W / 2, qr + pad + 135);
+
+          out.toBlob(blob => {
+            const a = document.createElement("a");
+            a.href = URL.createObjectURL(blob);
+            a.download = "qr-code-permanent-discutons.png";
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            setTimeout(() => URL.revokeObjectURL(a.href), 3000);
+          }, "image/png");
+        } catch (e) {
+          window.open(`https://api.qrserver.com/v1/create-qr-code/?size=1000x1000&margin=40&data=${encodeURIComponent(url)}`, "_blank");
+        }
+      }
+      permanentDownloadBtn.addEventListener("click", downloadPermanentQr);
+
+      /* ---------- SAUVEGARDE / RESTAURATION DE L'IDENTITÉ HÔTE ---------- */
+      function exportBackup() {
+        const includeMessages = confirm(
+          "💾 Sauvegarde de votre identité d'hôte\n\n" +
+          "Inclure aussi l'historique des messages ?\n" +
+          "OK = oui (fichier plus lourd)   ·   Annuler = identité, QR et contacts seulement"
+        );
+        const data = {
+          app: "discutons-prive",
+          version: 2,
+          exportedAt: new Date().toISOString(),
+          hostId,
+          invite: inviteSettings,
+          contacts: myContacts.map(c => ({ ...c, status: "offline" })),
+          banned: bannedChannels
+        };
+        if (includeMessages) data.messages = chatStorage;
+
+        const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(blob);
+        a.download = `discutons-sauvegarde-hote-${new Date().toISOString().slice(0, 10)}.json`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(a.href), 3000);
+        alert("✅ Sauvegarde téléchargée.\n\n⚠️ Ce fichier permet de se faire passer pour vous : conservez-le en lieu sûr.");
+      }
+
+      function importBackup(file) {
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = () => {
+          const data = safeParse(reader.result, null);
+          if (!data || data.app !== "discutons-prive" || !HOST_ID_REGEX.test(String(data.hostId || ""))) {
+            alert("❌ Fichier de sauvegarde invalide.");
+            return;
+          }
+          const ok = confirm(
+            "📂 Restaurer cette sauvegarde ?\n\n" +
+            "Votre identité d'hôte, votre QR permanent et vos contacts actuels sur cet appareil seront REMPLACÉS.\n" +
+            "N'utilisez qu'un seul appareil hôte à la fois."
+          );
+          if (!ok) return;
+          localStorage.setItem(KEY_HOST_ID, data.hostId);
+          if (data.invite && typeof data.invite.token === "string") localStorage.setItem(KEY_INVITE, JSON.stringify(data.invite));
+          if (Array.isArray(data.contacts)) localStorage.setItem(KEY_CONTACTS, JSON.stringify(data.contacts));
+          if (Array.isArray(data.banned)) localStorage.setItem(KEY_BANNED, JSON.stringify(data.banned));
+          if (data.messages && typeof data.messages === "object") localStorage.setItem(LEGACY_MSG_KEY, JSON.stringify(data.messages));
+          if (peer) { try { peer.destroy(); } catch (e) {} }
+          window.location.href = currentPageUrlWithoutParams();
+        };
+        reader.readAsText(file);
+      }
+
+      backupExportBtn.addEventListener("click", exportBackup);
+      backupImportBtn.addEventListener("click", () => backupImportInput.click());
+      backupImportInput.addEventListener("change", () => {
+        importBackup(backupImportInput.files && backupImportInput.files[0]);
+        backupImportInput.value = "";
+      });
+
+      /* ========================================================
+         MENU "PLUS D'OPTIONS"
+         ======================================================== */
+      moreOptionsBtn.addEventListener("click", () => { moreMenuModal.style.display = "flex"; });
+      closeMoreMenuBtn.addEventListener("click", () => { moreMenuModal.style.display = "none"; });
+
+      menuRenameBtn.addEventListener("click", () => {
+        moreMenuModal.style.display = "none";
+        if (activeChannelId) renameContact(activeChannelId);
+      });
+      menuQrBtn.addEventListener("click", () => {
+        moreMenuModal.style.display = "none";
+        if (!activeChannelId) return;
+        const contact = myContacts.find(c => c.channelId === activeChannelId);
+        openShareModal(activeChannelId, contact ? contact.alias : "Contact");
+      });
+      menuMuteBtn.addEventListener("click", () => {
+        moreMenuModal.style.display = "none";
+        if (activeChannelId) toggleMuteContact(activeChannelId);
+      });
+      menuBlockBtn.addEventListener("click", () => {
+        moreMenuModal.style.display = "none";
+        if (activeChannelId) toggleBlockContact(activeChannelId);
+      });
+      menuDeleteBtn.addEventListener("click", () => {
+        moreMenuModal.style.display = "none";
+        if (activeChannelId) deleteContact(activeChannelId);
+      });
+
+      sendBtn.addEventListener("click", sendMessage);
+      chatInput.addEventListener("keydown", event => {
+        if (event.key === "Enter" && !event.shiftKey) {
+          event.preventDefault();
+          sendMessage();
+        }
+      });
+      pingBtn.addEventListener("click", sendPingAlert);
+      imageBtn.addEventListener("click", () => imageInput.click());
+      imageInput.addEventListener("change", () => sendImage(imageInput.files && imageInput.files[0]));
+
+      quickEmojis.addEventListener("click", event => {
+        const chip = event.target.closest(".emoji-btn");
+        if (!chip || chatInput.disabled) return;
+        const emoji = chip.textContent;
+        if (emoji === "🔔") { sendPingAlert(); return; }
+        if (emoji === "🎥") { startOutgoingCall(true); return; }
+        chatInput.value += emoji;
+        chatInput.focus();
+      });
+
+      infoHostBtn.addEventListener("click", () => {
+        alert(
+          "🛡️ SÉCURITÉ & CONTRÔLE\n\n" +
+          "• Messages chiffrés AES-256-GCM (+ DTLS du canal WebRTC), appels DTLS-SRTP en pair-à-pair.\n" +
+          "• File d'attente : les messages écrits hors ligne sont remis à la reconnexion.\n" +
+          "• Isolation : chaque contact est confiné à son propre fil.\n" +
+          "• QR permanent : chacun crée son fil, vous gardez le contrôle (validation, renommage, blocage, suppression, pause ou révocation du QR)."
+        );
+      });
+
+      lightbox.addEventListener("click", () => {
+        lightbox.style.display = "none";
+        lightboxImg.src = "";
+      });
+
+      mobileBackBtn.addEventListener("click", () => sidebar.classList.remove("hidden-mobile"));
+
+      /* ========================================================
+         9. ROUTEUR D'URL (HÔTE / INVITÉ / INVITÉ VIA QR PERMANENT)
+         ======================================================== */
+      function migrateLegacyGuestHistory(channelId) {
+        if (chatStorage[channelId]) return;
+        const hostContacts = safeParse(localStorage.getItem(KEY_CONTACTS), []);
+        if (Array.isArray(hostContacts) && hostContacts.some(c => c.channelId === channelId)) return; // appareil hôte
+        const legacy = safeParse(localStorage.getItem(LEGACY_MSG_KEY), {});
+        if (legacy && legacy[channelId]) {
+          chatStorage[channelId] = legacy[channelId];
+          saveChatHistory();
+        }
+        const legacyOutbox = safeParse(localStorage.getItem(LEGACY_OUTBOX_KEY), {});
+        if (legacyOutbox && legacyOutbox[channelId] && !pendingOutbox[channelId]) {
+          pendingOutbox[channelId] = legacyOutbox[channelId];
+          saveOutbox();
+        }
+      }
+
+      function startGuestMode(targetHostId, channelId, inviteToken) {
+        isGuestMode = true;
+        hostId = targetHostId;
+        guestChannelId = channelId;
+        activeChannelId = channelId;
+        guestInviteToken = inviteToken || null;
+
+        const thread = getGuestThreads()[targetHostId];
+        guestAlias = thread && thread.channelId === channelId ? (thread.alias || "") : "";
+
+        migrateLegacyGuestHistory(channelId);
+
+        sidebar.style.display = "none";
+        emptyState.style.display = "none";
+        chatHeader.style.display = "flex";
+        messagesContainer.style.display = "flex";
+        chatFooter.style.display = "flex";
+        shareActiveBtn.style.display = "none";
+        blockBtn.style.display = "none";
+        muteContactBtn.style.display = "none";
+        deleteChatBtn.style.display = "none";
+        moreOptionsBtn.style.display = "none";
+
+        activeName.textContent = "L'Hôte (Privé)";
+        updateActiveStatusLabel();
+
+        if (guestInviteToken && !(chatStorage[channelId] || []).length) {
+          storeAndDisplayMessage(channelId, "system",
+            `📌 Votre fil privé est prêt${guestAlias ? " (pseudo : " + guestAlias + ")" : ""}. Écrivez votre premier message : il sera remis dès que l'hôte sera en ligne.`);
+        }
+        renderMessages(channelId);
+        initPeerNetwork();
+
+        setComposerLocked(false);
+        setTimeout(() => chatInput.focus(), 300);
+      }
+
+      function goToGuestThread(targetHostId, channelId, inviteToken) {
+        const url = `${currentPageUrlWithoutParams()}?host=${encodeURIComponent(targetHostId)}&channel=${encodeURIComponent(channelId)}` +
+          (inviteToken ? `&invite=${encodeURIComponent(inviteToken)}` : "");
+        try { history.replaceState(null, "", url); } catch (e) {}
+        startGuestMode(targetHostId, channelId, inviteToken);
+      }
+
+      /** Un visiteur arrive via le QR permanent (?host=...&invite=...) */
+      function startGuestFromInvite(targetHostId, inviteToken) {
+        sidebar.style.display = "none";
+        emptyState.style.display = "none";
+
+        const threads = getGuestThreads();
+        const existing = threads[targetHostId];
+        if (existing && existing.channelId && CHANNEL_ID_REGEX.test(existing.channelId)) {
+          // Ce téléphone a déjà un fil avec cet hôte : on le rouvre
+          existing.invite = inviteToken;
+          saveGuestThreads(threads);
+          goToGuestThread(targetHostId, existing.channelId, inviteToken);
+          return;
+        }
+
+        joinModal.style.display = "flex";
+        setTimeout(() => joinAliasInput.focus(), 200);
+
+        const confirmJoin = () => {
+          const alias = sanitizeAlias(joinAliasInput.value) || "Invité";
+          const channelId = "c-" + generateToken(12);
+          const all = getGuestThreads();
+          all[targetHostId] = { channelId, alias, invite: inviteToken, createdAt: Date.now() };
+          saveGuestThreads(all);
+          joinModal.style.display = "none";
+          goToGuestThread(targetHostId, channelId, inviteToken);
+        };
+        confirmJoinBtn.onclick = confirmJoin;
+        joinAliasInput.onkeydown = e => { if (e.key === "Enter") { e.preventDefault(); confirmJoin(); } };
+      }
+
+      function initApp() {
+        const params = new URLSearchParams(window.location.search);
+        const hostParam = params.get("host");
+        const channelParam = params.get("channel");
+        const inviteParam = params.get("invite");
+
+        const validHost = hostParam && HOST_ID_REGEX.test(hostParam);
+        const guestContext = !!(validHost && (channelParam || inviteParam));
+
+        loadLocalStorageData(guestContext);
+        checkNotificationPermission();
+        detectEmbeddedWebView();
+
+        if (validHost && channelParam && CHANNEL_ID_REGEX.test(channelParam)) {
+          // --- MODE INVITÉ (lien individuel, ou fil créé via QR permanent) ---
+          startGuestMode(hostParam, channelParam, inviteParam);
+        } else if (validHost && inviteParam) {
+          // --- MODE INVITÉ VIA QR PERMANENT ---
+          startGuestFromInvite(hostParam, inviteParam);
+        } else {
+          // --- MODE HÔTE ---
+          isGuestMode = false;
+          renderSidebar();
+          if (myContacts.length > 0) selectChannel(myContacts[0].channelId);
+          else showEmptyState();
+          initPeerNetwork();
+        }
+      }
+
+      initApp();
+    })();
+  </script>
+<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a4b5dfec78c7f533',t:'MTc5MjE0MTI0Mg=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+</html>
