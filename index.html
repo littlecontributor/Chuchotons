@@ -1030,6 +1030,7 @@
           <div class="brand-badge">🔒 AES-256 E2EE</div>
           <div class="sidebar-actions">
             <button id="sound-toggle-btn" class="icon-btn" title="Activer/Désactiver tous les sons et sonneries" aria-label="Sons">🔊</button>
+            <button id="sidebar-diagnostic-btn" class="icon-btn" title="Diagnostic réseau (relais TURN, connexion)" aria-label="Diagnostic">🩺</button>
             <button id="info-host-btn" class="icon-btn" title="Sécurité, Silence et Isolation" aria-label="Infos">🛡️</button>
           </div>
         </div>
@@ -1083,7 +1084,10 @@
 
       <div id="offline-banner" class="offline-banner" style="display: none;">
         <span id="offline-banner-text">⏳ <strong>Hôte hors ligne :</strong> Message sauvegardé, envoyé dès qu'il s'ouvre.</span>
-        <button id="reconnect-btn" class="secondary-btn small-btn" type="button">🔄 Reconnecter</button>
+        <div style="display: flex; gap: 6px;">
+          <button id="diagnostic-btn" class="secondary-btn small-btn" type="button">🩺 Diagnostic</button>
+          <button id="reconnect-btn" class="secondary-btn small-btn" type="button">🔄 Reconnecter</button>
+        </div>
       </div>
 
       <!-- En-tête de la conversation active -->
@@ -1361,21 +1365,96 @@
     (() => {
       "use strict";
 
+      /* ==================================================================
+         ⚙️ CONFIGURATION DU RELAIS TURN — À REMPLIR UNE FOIS
+         ------------------------------------------------------------------
+         Sans relais TURN, deux appareils sur des réseaux différents
+         (ex : téléphone en 4G ↔ PC sur box) n'arrivent souvent PAS à se
+         connecter : le fil se crée mais tout le monde reste "hors ligne".
+
+         Option A (recommandée, gratuite 20 Go/mois) : Metered Open Relay
+           1. Créez un compte : https://dashboard.metered.ca/signup?tool=turnserver
+           2. Recopiez le nom de votre app (ce qui précède ".metered.live")
+              et votre clé API TURN ci-dessous.
+         Option B : serveurs TURN statiques (coturn perso, autre fournisseur)
+           staticServers: [{ urls: "turn:mon-serveur:3478", username: "u", credential: "p" }]
+         ================================================================== */
+      const TURN_CONFIG = {
+        // ▼ Solution 1 (la plus simple) : collez ici l'adresse COMPLÈTE donnée par Metered,
+        //   du type https://chuchotons.metered.live/api/v1/turn/credentials?apiKey=XXXXXXXX
+        credentialsUrl: "",
+
+        // ▼ Solution 2 : nom de l'app + clé API de l'identifiant TURN
+        //   (⚠️ PAS la « Secret key » de la page Developers, PAS la clé pk_live_...)
+        meteredAppName: "chuchotons",
+        meteredApiKey: "",
+
+        // ▼ Solution 3 : serveurs TURN statiques — identifiants Metered "Chuchotons" (workspace default)
+        staticServers: [
+          { urls: "stun:stun.relay.metered.ca:80" },
+          { urls: "turn:global.relay.metered.ca:80", username: "c268d9f35acd7b3cb73c3735", credential: "z6HP+Rj8f0W1ZGBi" },
+          { urls: "turn:global.relay.metered.ca:80?transport=tcp", username: "c268d9f35acd7b3cb73c3735", credential: "z6HP+Rj8f0W1ZGBi" },
+          { urls: "turn:global.relay.metered.ca:443", username: "c268d9f35acd7b3cb73c3735", credential: "z6HP+Rj8f0W1ZGBi" },
+          { urls: "turns:global.relay.metered.ca:443?transport=tcp", username: "c268d9f35acd7b3cb73c3735", credential: "z6HP+Rj8f0W1ZGBi" }
+        ]
+      };
+
+      const STUN_SERVERS = [
+        { urls: "stun:stun.l.google.com:19302" },
+        { urls: "stun:stun1.l.google.com:19302" },
+        { urls: "stun:stun.cloudflare.com:3478" },
+        { urls: "stun:global.stun.twilio.com:3478" }
+      ];
+
       const PEER_OPTIONS = {
         host: "0.peerjs.com",
         port: 443,
         path: "/",
         secure: true,
         debug: 1,
-        config: {
-          iceServers: [
-            { urls: "stun:stun.l.google.com:19302" },
-            { urls: "stun:global.stun.twilio.com:3478" },
-            { urls: "stun:stun1.l.google.com:19302" },
-            { urls: "stun:stun2.l.google.com:19302" }
-          ]
-        }
+        config: { iceServers: STUN_SERVERS.slice() }
       };
+
+      // "ok" = relais TURN disponible · "none" = pas configuré · "error" = échec de récupération
+      let turnStatus = "none";
+      const CONNECT_TIMEOUT_MS = 20000;
+
+      function hasTurnServer(list) {
+        return list.some(s => [].concat(s && s.urls ? s.urls : []).some(u => /^turns?:/i.test(String(u))));
+      }
+
+      async function loadIceServers() {
+        const servers = STUN_SERVERS.slice();
+        let fetchFailed = false;
+        if (Array.isArray(TURN_CONFIG.staticServers)) servers.push(...TURN_CONFIG.staticServers.filter(Boolean));
+
+        let credentialsUrl = "";
+        if (/^https:\/\/[a-z0-9-]+\.metered\.live\/api\/v1\/turn\/credentials\?apiKey=.+/i.test(String(TURN_CONFIG.credentialsUrl || "").trim())) {
+          credentialsUrl = String(TURN_CONFIG.credentialsUrl).trim();
+        } else if (TURN_CONFIG.meteredAppName && TURN_CONFIG.meteredApiKey) {
+          credentialsUrl = `https://${encodeURIComponent(String(TURN_CONFIG.meteredAppName).trim().toLowerCase())}.metered.live/api/v1/turn/credentials?apiKey=${encodeURIComponent(String(TURN_CONFIG.meteredApiKey).trim())}`;
+        }
+
+        if (credentialsUrl) {
+          try {
+            const ctrl = typeof AbortController !== "undefined" ? new AbortController() : null;
+            const timer = ctrl ? setTimeout(() => ctrl.abort(), 6000) : null;
+            const res = await fetch(credentialsUrl, ctrl ? { signal: ctrl.signal } : {});
+            if (timer) clearTimeout(timer);
+            if (!res.ok) throw new Error("HTTP " + res.status);
+            const list = await res.json();
+            if (Array.isArray(list)) servers.push(...list);
+            else if (list && Array.isArray(list.iceServers)) servers.push(...list.iceServers);
+          } catch (e) {
+            fetchFailed = true;
+            console.warn("Impossible de récupérer les identifiants TURN :", e);
+          }
+        }
+
+        turnStatus = hasTurnServer(servers) ? "ok" : (fetchFailed ? "error" : "none");
+        PEER_OPTIONS.config.iceServers = servers;
+        console.log("Serveurs ICE :", servers.length, "· relais TURN :", turnStatus);
+      }
 
       /* ---------- Clés de stockage ---------- */
       const KEY_HOST_ID = "discutons_host_id";
@@ -2133,6 +2212,15 @@
           activeLed.className = "led online";
           activeStatusLabel.textContent = "Connecté en direct P2P";
           offlineBanner.style.display = "none";
+        } else if (conn && !connectionFailureReported[activeChannelId]) {
+          activeLed.className = "led ping";
+          activeStatusLabel.textContent = "Connexion en cours…";
+          offlineBanner.style.display = "none";
+        } else if (conn) {
+          activeLed.className = "led blocked";
+          activeStatusLabel.textContent = "Échec de connexion réseau";
+          offlineBannerText.innerHTML = "⚠️ <strong>Connexion réseau impossible</strong> — vos messages restent en attente. Lancez le diagnostic.";
+          offlineBanner.style.display = "flex";
         } else {
           activeLed.className = "led";
           activeStatusLabel.textContent = "Hors ligne (en attente)";
@@ -2140,11 +2228,58 @@
         }
       }
 
+      /* ---------- DIAGNOSTIC RÉSEAU ---------- */
+      async function runNetworkDiagnostic(button) {
+        const label = button ? button.textContent : "";
+        if (button) { button.disabled = true; button.textContent = "⏳ Test…"; }
+        const found = { host: 0, srflx: 0, relay: 0 };
+        try {
+          if (turnStatus !== "ok") await loadIceServers();
+          const pc = new RTCPeerConnection({ iceServers: PEER_OPTIONS.config.iceServers });
+          pc.createDataChannel("diagnostic");
+          pc.onicecandidate = e => {
+            const m = e.candidate && / typ (host|srflx|relay)/.exec(e.candidate.candidate || "");
+            if (m) found[m[1]]++;
+          };
+          await pc.setLocalDescription(await pc.createOffer());
+          await new Promise(resolve => {
+            const t = setTimeout(resolve, 8000);
+            pc.onicegatheringstatechange = () => {
+              if (pc.iceGatheringState === "complete") { clearTimeout(t); resolve(); }
+            };
+          });
+          pc.close();
+        } catch (e) {
+          console.error("Diagnostic :", e);
+        }
+        if (button) { button.disabled = false; button.textContent = label; }
+
+        const yes = v => (v ? "✅" : "❌");
+        let verdict;
+        if (found.relay) verdict = "✅ Le relais TURN fonctionne : la connexion doit aboutir sur tous les réseaux (à condition que l'autre appareil utilise la même version de la page).";
+        else if (found.srflx) verdict = "⚠️ Pas de relais TURN : la connexion directe fonctionne entre appareils sur le même Wi-Fi, mais échoue souvent entre 4G et box. Configurez TURN_CONFIG.";
+        else verdict = "❌ Ce réseau bloque WebRTC (UDP). Seul un relais TURN en TCP/443 (turns:) peut passer.";
+
+        alert(
+          "🩺 DIAGNOSTIC RÉSEAU\n\n" +
+          `Serveur de mise en relation PeerJS : ${peer && peer.open ? "✅ connecté" : "❌ non connecté"}\n` +
+          `Relais TURN configuré : ${turnStatus === "ok" ? "✅ oui" : turnStatus === "error" ? "❌ identifiants refusés / injoignables" : "❌ non (STUN seulement)"}\n\n` +
+          `Adresse locale : ${yes(found.host)}   Adresse publique (STUN) : ${yes(found.srflx)}   Relais (TURN) : ${yes(found.relay)}\n\n` +
+          verdict
+        );
+      }
+
+      document.getElementById("diagnostic-btn").addEventListener("click", e => runNetworkDiagnostic(e.currentTarget));
+      document.getElementById("sidebar-diagnostic-btn").addEventListener("click", e => runNetworkDiagnostic(e.currentTarget));
+
       reconnectBtn.addEventListener("click", () => {
         if (!activeChannelId) return;
         storeAndDisplayMessage(activeChannelId, "system", "🔄 Tentative de reconnexion avec l'hôte...");
         if (isGuestMode) {
           guestAccessDenied = false;
+          connectionFailureReported[activeChannelId] = false;
+          const stale = activeConnections[activeChannelId];
+          if (stale && !stale.open) { try { stale.close(); } catch (e) {} delete activeConnections[activeChannelId]; }
           setComposerLocked(false);
           if (peer && peer.disconnected && !peer.destroyed) peer.reconnect();
           connectToHostWithRetry(hostId, activeChannelId);
@@ -2521,11 +2656,12 @@
         return { ok: true, contact };
       }
 
-      function initPeerNetwork() {
+      async function initPeerNetwork() {
         if (typeof Peer === "undefined") {
           alert("Erreur : PeerJS introuvable. Vérifiez votre connexion Internet.");
           return;
         }
+        await loadIceServers();
 
         if (isGuestMode) {
           peer = new Peer(undefined, PEER_OPTIONS);
@@ -2612,13 +2748,16 @@
         if (!autoReconnectInterval) {
           autoReconnectInterval = setInterval(() => {
             if (guestAccessDenied) return;
-            if (!activeConnections[channelId] || !activeConnections[channelId].open) {
-              if (peer.disconnected || peer.destroyed) return;
-              const retryConn = peer.connect(targetHostId, { reliable: true, metadata: guestConnMetadata(channelId) });
-              setupConnection(retryConn, channelId);
-            } else {
+            const current = activeConnections[channelId];
+            if (current && current.open) {
               flushPendingOutbox(channelId);
+              return;
             }
+            // Négociation encore en cours (peut prendre plusieurs secondes via relais) : on attend
+            if (current && Date.now() - (current._startedAt || 0) < CONNECT_TIMEOUT_MS) return;
+            if (peer.disconnected || peer.destroyed) return;
+            const retryConn = peer.connect(targetHostId, { reliable: true, metadata: guestConnMetadata(channelId) });
+            setupConnection(retryConn, channelId);
           }, 8000);
         }
       }
@@ -2647,12 +2786,60 @@
         offlineBanner.style.display = "none";
       }
 
+      const connectionFailureReported = {};
+
+      function reportConnectionFailure(channelId, detail) {
+        if (connectionFailureReported[channelId]) return;
+        const conn = activeConnections[channelId];
+        if (conn && conn.open) return;
+        connectionFailureReported[channelId] = true;
+        console.warn("Échec de connexion WebRTC sur", channelId, detail);
+
+        let text;
+        if (isGuestMode) {
+          text = "⚠️ L'hôte a bien reçu votre demande, mais la connexion directe n'aboutit pas depuis votre réseau. " +
+                 "Essayez en Wi-Fi (ou en 4G si vous êtes en Wi-Fi). Vos messages restent en attente et seront remis automatiquement.";
+        } else if (turnStatus === "ok") {
+          text = "⚠️ Le correspondant vous a joint mais la connexion échoue même via le relais TURN. " +
+                 "Lancez « 🩺 Diagnostic » : son réseau bloque peut-être tout le trafic WebRTC.";
+        } else {
+          text = "⚠️ Le correspondant vous a joint mais vos deux réseaux ne parviennent pas à se connecter directement (cas typique 4G ↔ box). " +
+                 (turnStatus === "error"
+                   ? "Les identifiants du relais TURN n'ont pas pu être récupérés : vérifiez TURN_CONFIG (nom d'app / clé API)."
+                   : "Aucun relais TURN n'est configuré : remplissez TURN_CONFIG en haut du script.");
+        }
+        storeAndDisplayMessage(channelId, "system", text);
+        if (activeChannelId === channelId) updateActiveStatusLabel();
+      }
+
+      function watchConnection(conn, channelId) {
+        conn._startedAt = Date.now();
+        const pc = conn.peerConnection;
+        if (pc && pc.addEventListener) {
+          pc.addEventListener("iceconnectionstatechange", () => {
+            if (pc.iceConnectionState === "failed" && activeConnections[channelId] === conn) {
+              reportConnectionFailure(channelId, "ice-failed");
+            }
+          });
+        }
+        setTimeout(() => {
+          if (!conn.open && activeConnections[channelId] === conn) reportConnectionFailure(channelId, "timeout");
+        }, CONNECT_TIMEOUT_MS);
+      }
+
       function setupConnection(conn, channelId) {
+        const previous = activeConnections[channelId];
+        if (previous && previous !== conn && !previous.open) {
+          try { previous.close(); } catch (e) {}
+        }
         activeConnections[channelId] = conn;
+        watchConnection(conn, channelId);
+        if (activeChannelId === channelId) updateActiveStatusLabel();
 
         conn.on("open", () => {
           if (activeConnections[channelId] !== conn) activeConnections[channelId] = conn;
           remotePeerIds[channelId] = conn.peer;
+          connectionFailureReported[channelId] = false;
 
           const contact = myContacts.find(c => c.channelId === channelId);
           if (contact && !contact.isBlocked) {
@@ -3449,5 +3636,5 @@
       initApp();
     })();
   </script>
-</body>
+<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a4b61a9bdd3d0cd3',t:'MTc5MjE0MzY0Ng=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>
