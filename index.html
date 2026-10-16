@@ -1417,7 +1417,9 @@
 
       // "ok" = relais TURN disponible · "none" = pas configuré · "error" = échec de récupération
       let turnStatus = "none";
-      const CONNECT_TIMEOUT_MS = 20000;
+      const CONNECT_TIMEOUT_MS = 25000;
+      const APP_VERSION = "2026-10-16-d";
+      console.log("Discutons Privé · version", APP_VERSION);
 
       function hasTurnServer(list) {
         return list.some(s => [].concat(s && s.urls ? s.urls : []).some(u => /^turns?:/i.test(String(u))));
@@ -2228,6 +2230,29 @@
         }
       }
 
+      /* ---------- DÉTECTION DES AUTRES ONGLETS OUVERTS ---------- */
+      const otherTabs = new Map();
+      let tabChannel = null;
+      try {
+        tabChannel = new BroadcastChannel("discutons-tabs");
+        tabChannel.onmessage = e => {
+          const d = e.data || {};
+          if (d.type === "hello" || d.type === "here") {
+            otherTabs.set(d.tabId, { mode: d.mode, version: d.version, path: d.path, hostId: d.hostId });
+            if (d.type === "hello") tabChannel.postMessage(tabInfo("here"));
+            if (!isGuestMode && d.mode === "hôte" && d.hostId === hostId) {
+              console.warn("Autre onglet hôte détecté :", d);
+            }
+          }
+          if (d.type === "bye") otherTabs.delete(d.tabId);
+        };
+      } catch (e) {}
+      const myTabId = generateToken(6);
+      function tabInfo(type) {
+        return { type, tabId: myTabId, mode: isGuestMode ? "invité" : "hôte", version: APP_VERSION, path: location.pathname, hostId: isGuestMode ? null : hostId };
+      }
+      window.addEventListener("beforeunload", () => { try { tabChannel && tabChannel.postMessage(tabInfo("bye")); } catch (e) {} });
+
       /* ---------- DIAGNOSTIC RÉSEAU ---------- */
       async function runNetworkDiagnostic(button) {
         const label = button ? button.textContent : "";
@@ -2255,18 +2280,62 @@
         if (button) { button.disabled = false; button.textContent = label; }
 
         const yes = v => (v ? "✅" : "❌");
+        try { tabChannel && tabChannel.postMessage(tabInfo("hello")); } catch (e) {}
+        await new Promise(r => setTimeout(r, 400));
+        const conn = activeChannelId ? activeConnections[activeChannelId] : null;
+        const connInfo = !activeChannelId ? "aucun fil sélectionné"
+          : conn && conn.open ? "✅ ouverte · " + (await collectIceInfo(conn))
+          : conn ? "⏳/❌ non ouverte · " + (lastIceInfo[activeChannelId] || await collectIceInfo(conn))
+          : "aucune tentative en cours (correspondant jamais venu depuis l'ouverture de la page)";
+        const ua = navigator.userAgent;
+        const browser = (/EdgA?\//.test(ua) ? "Edge" : /SamsungBrowser/.test(ua) ? "Samsung Internet" : /OPR\//.test(ua) ? "Opera"
+          : /Firefox|FxiOS/.test(ua) ? "Firefox" : /CriOS|Chrome/.test(ua) ? "Chrome" : /Safari/.test(ua) ? "Safari" : "Navigateur inconnu")
+          + (/Android/.test(ua) ? " Android" : /iPhone|iPad/.test(ua) ? " iOS" : /Windows/.test(ua) ? " Windows" : /Mac OS/.test(ua) ? " Mac" : "");
+        const tabsList = [...otherTabs.values()];
+        const tabsText = tabsList.length
+          ? tabsList.map(t => `${t.mode} ${t.path} v${t.version}`).join(" ; ")
+          : "aucun (ou anciennes versions non détectables)";
         let verdict;
         if (found.relay) verdict = "✅ Le relais TURN fonctionne : la connexion doit aboutir sur tous les réseaux (à condition que l'autre appareil utilise la même version de la page).";
         else if (found.srflx) verdict = "⚠️ Pas de relais TURN : la connexion directe fonctionne entre appareils sur le même Wi-Fi, mais échoue souvent entre 4G et box. Configurez TURN_CONFIG.";
         else verdict = "❌ Ce réseau bloque WebRTC (UDP). Seul un relais TURN en TCP/443 (turns:) peut passer.";
 
-        alert(
+        showDiagnosticModal(
           "🩺 DIAGNOSTIC RÉSEAU\n\n" +
+          `Version de la page : ${APP_VERSION} · Mode : ${isGuestMode ? "invité" : "hôte"}\n` +
+          `Navigateur : ${browser} · WebRTC : ${typeof RTCPeerConnection !== "undefined" ? "✅" : "❌ NON DISPONIBLE"}\n` +
+          `Autres onglets de ce site ouverts : ${tabsText}\n` +
           `Serveur de mise en relation PeerJS : ${peer && peer.open ? "✅ connecté" : "❌ non connecté"}\n` +
           `Relais TURN configuré : ${turnStatus === "ok" ? "✅ oui" : turnStatus === "error" ? "❌ identifiants refusés / injoignables" : "❌ non (STUN seulement)"}\n\n` +
           `Adresse locale : ${yes(found.host)}   Adresse publique (STUN) : ${yes(found.srflx)}   Relais (TURN) : ${yes(found.relay)}\n\n` +
-          verdict
+          verdict + "\n\n" +
+          `Connexion du fil actuel : ${connInfo}`
         );
+      }
+
+      function showDiagnosticModal(text) {
+        let overlay = document.getElementById("diagnostic-modal");
+        if (!overlay) {
+          overlay = document.createElement("div");
+          overlay.id = "diagnostic-modal";
+          overlay.className = "modal-overlay";
+          overlay.innerHTML = `
+            <div class="modal-card">
+              <h2>🩺 Diagnostic réseau</h2>
+              <pre id="diagnostic-text" style="white-space: pre-wrap; word-break: break-word; font-size: 0.78rem; line-height: 1.4; background: rgba(0,0,0,0.35); border: 1px solid var(--border); border-radius: 12px; padding: 12px; color: #fce7f3; max-height: 55vh; overflow: auto;"></pre>
+              <div class="modal-actions">
+                <button id="diagnostic-copy-btn" class="primary-btn" style="flex: 1;" type="button">📋 Copier le diagnostic</button>
+                <button id="diagnostic-close-btn" class="secondary-btn" style="flex: 1;" type="button">Fermer</button>
+              </div>
+            </div>`;
+          document.body.appendChild(overlay);
+          overlay.querySelector("#diagnostic-close-btn").addEventListener("click", () => { overlay.style.display = "none"; });
+          overlay.querySelector("#diagnostic-copy-btn").addEventListener("click", e => {
+            copyText(overlay.querySelector("#diagnostic-text").textContent, e.currentTarget, "📋 Copier le diagnostic");
+          });
+        }
+        overlay.querySelector("#diagnostic-text").textContent = text;
+        overlay.style.display = "flex";
       }
 
       document.getElementById("diagnostic-btn").addEventListener("click", e => runNetworkDiagnostic(e.currentTarget));
@@ -2788,12 +2857,14 @@
 
       const connectionFailureReported = {};
 
-      function reportConnectionFailure(channelId, detail) {
+      async function reportConnectionFailure(channelId, detail) {
         if (connectionFailureReported[channelId]) return;
         const conn = activeConnections[channelId];
         if (conn && conn.open) return;
         connectionFailureReported[channelId] = true;
-        console.warn("Échec de connexion WebRTC sur", channelId, detail);
+        lastIceInfo[channelId] = `${detail} · ${await collectIceInfo(conn)}`;
+        console.warn("Échec de connexion WebRTC sur", channelId, lastIceInfo[channelId]);
+        if (activeConnections[channelId] && activeConnections[channelId].open) return;
 
         let text;
         if (isGuestMode) {
@@ -2808,8 +2879,33 @@
                    ? "Les identifiants du relais TURN n'ont pas pu être récupérés : vérifiez TURN_CONFIG (nom d'app / clé API)."
                    : "Aucun relais TURN n'est configuré : remplissez TURN_CONFIG en haut du script.");
         }
-        storeAndDisplayMessage(channelId, "system", text);
+        storeAndDisplayMessage(channelId, "system", text + " (Détails techniques : 🩺 Diagnostic)");
         if (activeChannelId === channelId) updateActiveStatusLabel();
+      }
+
+      const lastIceInfo = {};
+
+      async function collectIceInfo(conn) {
+        const pc = conn && conn.peerConnection;
+        if (!pc) return "pas de connexion WebRTC créée";
+        const local = new Set(), remote = new Set();
+        let pair = "";
+        try {
+          const stats = await pc.getStats();
+          const byId = {};
+          stats.forEach(r => { byId[r.id] = r; });
+          stats.forEach(r => {
+            if (r.type === "local-candidate") local.add(r.candidateType + (r.protocol ? "/" + r.protocol : ""));
+            if (r.type === "remote-candidate") remote.add(r.candidateType + (r.protocol ? "/" + r.protocol : ""));
+            if (r.type === "candidate-pair" && (r.nominated || r.selected) && r.state === "succeeded") {
+              const l = byId[r.localCandidateId], rr = byId[r.remoteCandidateId];
+              pair = `${l ? l.candidateType : "?"} ↔ ${rr ? rr.candidateType : "?"}`;
+            }
+          });
+        } catch (e) {}
+        return `ICE=${pc.iceConnectionState} · collecte=${pc.iceGatheringState} · signal=${pc.signalingState} · ` +
+               `candidats locaux=[${[...local].join(", ") || "aucun"}] · candidats distants=[${[...remote].join(", ") || "AUCUN"}]` +
+               (pair ? ` · chemin=${pair}` : "");
       }
 
       function watchConnection(conn, channelId) {
@@ -2829,8 +2925,8 @@
 
       function setupConnection(conn, channelId) {
         const previous = activeConnections[channelId];
-        if (previous && previous !== conn && !previous.open) {
-          try { previous.close(); } catch (e) {}
+        if (previous && previous.open && previous !== conn && !isGuestMode) {
+          // l'invité a rechargé sa page : la nouvelle connexion remplace l'ancienne
         }
         activeConnections[channelId] = conn;
         watchConnection(conn, channelId);
@@ -3149,7 +3245,7 @@
       async function copyText(text, button, label) {
         try {
           await navigator.clipboard.writeText(text);
-          button.textContent = "✅ Lien copié !";
+          button.textContent = "✅ Copié !";
           setTimeout(() => { button.textContent = label; }, 1800);
         } catch {
           prompt("Copiez ce lien :", text);
@@ -3636,5 +3732,5 @@
       initApp();
     })();
   </script>
-<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a4b61a9bdd3d0cd3',t:'MTc5MjE0MzY0Ng=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a4b62c125f9457fe',t:'MTc5MjE0NDM2MQ=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>
