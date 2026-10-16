@@ -1221,6 +1221,17 @@
         <button id="permanent-share-btn" class="secondary-btn" style="flex: 1; display: none;" type="button">📤 Partager</button>
       </div>
 
+      <div class="modal-section-title">Adresse publique de la page</div>
+      <div class="form-group" style="width: 100%; text-align: left;">
+        <label for="public-url-input">Lien utilisé dans le QR code (doit s'ouvrir sur un autre téléphone)</label>
+        <input type="url" id="public-url-input" placeholder="https://monpseudo.github.io/discutons/" autocomplete="off" inputmode="url" />
+        <div id="public-url-warning" style="display: none; font-size: 0.78rem; color: #fde68a; background: rgba(245,158,11,0.15); border: 1px solid rgba(245,158,11,0.4); border-radius: 12px; padding: 8px 10px; line-height: 1.35;"></div>
+        <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+          <button id="public-url-save-btn" class="secondary-btn" style="flex: 1;" type="button">💾 Enregistrer</button>
+          <button id="public-url-test-btn" class="secondary-btn" style="flex: 1;" type="button">🔗 Tester le lien</button>
+        </div>
+      </div>
+
       <div class="modal-section-title">Contrôle des nouveaux fils</div>
       <div class="settings-list">
         <label class="toggle-row" for="invite-enabled-toggle">
@@ -1458,6 +1469,10 @@
       const backupImportBtn = $("backup-import-btn");
       const backupImportInput = $("backup-import-input");
       const closePermanentModalBtn = $("close-permanent-modal-btn");
+      const publicUrlInput = $("public-url-input");
+      const publicUrlSaveBtn = $("public-url-save-btn");
+      const publicUrlTestBtn = $("public-url-test-btn");
+      const publicUrlWarning = $("public-url-warning");
 
       const joinModal = $("join-modal");
       const joinAliasInput = $("join-alias-input");
@@ -1807,6 +1822,42 @@
 
       function currentPageUrlWithoutParams() {
         return window.location.origin + window.location.pathname;
+      }
+
+      /* ---------- ADRESSE PUBLIQUE (évite les QR codes qui mènent à une 404) ---------- */
+      const KEY_PUBLIC_URL = "discutons_public_url";
+
+      function isHttpPage() {
+        return /^https?:$/.test(window.location.protocol) && window.location.origin && window.location.origin !== "null";
+      }
+
+      function normalizePublicUrl(value) {
+        let v = String(value || "").trim();
+        if (!v) return "";
+        if (!/^https?:\/\//i.test(v)) v = "https://" + v;
+        try {
+          const u = new URL(v);
+          if (!/^https?:$/.test(u.protocol)) return "";
+          return u.origin + u.pathname; // on retire ?paramètres et #ancre
+        } catch (e) {
+          return "";
+        }
+      }
+
+      /** Adresse de base utilisée dans TOUS les liens / QR partagés */
+      function getPublicBaseUrl() {
+        const saved = normalizePublicUrl(localStorage.getItem(KEY_PUBLIC_URL));
+        if (saved) return saved;
+        return isHttpPage() ? currentPageUrlWithoutParams() : "";
+      }
+
+      function isLocalAddress(url) {
+        try {
+          const h = new URL(url).hostname;
+          return h === "localhost" || h === "127.0.0.1" || h.endsWith(".local") || /^192\.168\.|^10\.|^172\.(1[6-9]|2\d|3[01])\./.test(h);
+        } catch (e) {
+          return true;
+        }
       }
 
       function getGuestThreads() {
@@ -2949,7 +3000,13 @@
       });
 
       function openShareModal(channelId, aliasName) {
-        const url = `${currentPageUrlWithoutParams()}?host=${encodeURIComponent(hostId)}&channel=${encodeURIComponent(channelId)}`;
+        const base = getPublicBaseUrl();
+        if (!base) {
+          alert("⚠️ Adresse publique de la page inconnue.\n\nOuvrez « 📌 Mon QR code permanent » et renseignez l'adresse en ligne de votre page (ex : https://monsite.github.io/discutons/).");
+          openPermanentModal();
+          return;
+        }
+        const url = `${base}?host=${encodeURIComponent(hostId)}&channel=${encodeURIComponent(channelId)}`;
         shareModalName.textContent = aliasName;
         secretLinkDisplay.textContent = url;
         renderQRCode(qrcodeBox, url, 220, "H");
@@ -2977,7 +3034,24 @@
 
       /* ---------- QR PERMANENT ---------- */
       function permanentUrl() {
-        return `${currentPageUrlWithoutParams()}?host=${encodeURIComponent(hostId)}&invite=${encodeURIComponent(inviteSettings.token)}`;
+        const base = getPublicBaseUrl();
+        if (!base) return "";
+        return `${base}?host=${encodeURIComponent(hostId)}&invite=${encodeURIComponent(inviteSettings.token)}`;
+      }
+
+      function refreshPublicUrlUi() {
+        const base = getPublicBaseUrl();
+        publicUrlInput.value = base;
+        let warn = "";
+        if (!base) {
+          warn = "⚠️ Cette page n'est pas ouverte depuis une adresse web (fichier local ou aperçu). Saisissez l'adresse publique de votre page, sinon le QR mènera à une erreur 404.";
+        } else if (isLocalAddress(base)) {
+          warn = "⚠️ Adresse locale : elle ne fonctionnera pas depuis un autre téléphone. Mettez la page en ligne (GitHub Pages, Netlify…) et indiquez son adresse.";
+        } else if (!base.startsWith("https://")) {
+          warn = "⚠️ Adresse en http : la caméra et le micro seront bloqués. Utilisez une adresse en https.";
+        }
+        publicUrlWarning.textContent = warn;
+        publicUrlWarning.style.display = warn ? "block" : "none";
       }
 
       function updatePermanentStatus() {
@@ -2993,9 +3067,18 @@
       }
 
       function openPermanentModal() {
+        refreshPublicUrlUi();
         const url = permanentUrl();
-        permanentLinkDisplay.textContent = url;
-        renderQRCode(permanentQrBox, url, 220, "M");
+        if (url) {
+          permanentLinkDisplay.textContent = url;
+          renderQRCode(permanentQrBox, url, 220, "M");
+          permanentQrBox.style.display = "block";
+        } else {
+          permanentLinkDisplay.textContent = "➡️ Renseignez l'adresse publique de votre page ci-dessous pour générer le QR code.";
+          permanentQrBox.innerHTML = "";
+          permanentQrBox.style.display = "none";
+        }
+        [permanentCopyBtn, permanentDownloadBtn, permanentShareBtn, publicUrlTestBtn].forEach(b => { b.disabled = !url; });
         inviteEnabledToggle.checked = !!inviteSettings.enabled;
         inviteApprovalToggle.checked = !!inviteSettings.requireApproval;
         updatePermanentStatus();
@@ -3013,10 +3096,32 @@
         permanentModal.style.display = "flex";
       }
 
+      publicUrlSaveBtn.addEventListener("click", () => {
+        const raw = publicUrlInput.value.trim();
+        if (!raw) {
+          localStorage.removeItem(KEY_PUBLIC_URL);
+        } else {
+          const norm = normalizePublicUrl(raw);
+          if (!norm) {
+            alert("❌ Adresse invalide. Exemple : https://monpseudo.github.io/discutons/");
+            return;
+          }
+          localStorage.setItem(KEY_PUBLIC_URL, norm);
+        }
+        publicUrlSaveBtn.textContent = "✅ Enregistrée";
+        setTimeout(() => { publicUrlSaveBtn.textContent = "💾 Enregistrer"; }, 1500);
+        openPermanentModal();
+      });
+
+      publicUrlTestBtn.addEventListener("click", () => {
+        const url = permanentUrl();
+        if (url) window.open(url, "_blank", "noopener");
+      });
+
       permanentQrBtn.addEventListener("click", openPermanentModal);
       emptyPermanentBtn.addEventListener("click", openPermanentModal);
       closePermanentModalBtn.addEventListener("click", () => { permanentModal.style.display = "none"; });
-      permanentCopyBtn.addEventListener("click", () => copyText(permanentUrl(), permanentCopyBtn, "📋 Copier le lien"));
+      permanentCopyBtn.addEventListener("click", () => { if (permanentUrl()) copyText(permanentUrl(), permanentCopyBtn, "📋 Copier le lien"); });
 
       inviteEnabledToggle.addEventListener("change", () => {
         inviteSettings.enabled = inviteEnabledToggle.checked;
@@ -3044,6 +3149,7 @@
 
       function downloadPermanentQr() {
         const url = permanentUrl();
+        if (!url) return;
         if (typeof QRCode === "undefined") {
           window.open(`https://api.qrserver.com/v1/create-qr-code/?size=1000x1000&margin=40&data=${encodeURIComponent(url)}`, "_blank");
           return;
@@ -3100,7 +3206,8 @@
           hostId,
           invite: inviteSettings,
           contacts: myContacts.map(c => ({ ...c, status: "offline" })),
-          banned: bannedChannels
+          banned: bannedChannels,
+          publicUrl: localStorage.getItem(KEY_PUBLIC_URL) || getPublicBaseUrl()
         };
         if (includeMessages) data.messages = chatStorage;
 
@@ -3134,6 +3241,7 @@
           if (data.invite && typeof data.invite.token === "string") localStorage.setItem(KEY_INVITE, JSON.stringify(data.invite));
           if (Array.isArray(data.contacts)) localStorage.setItem(KEY_CONTACTS, JSON.stringify(data.contacts));
           if (Array.isArray(data.banned)) localStorage.setItem(KEY_BANNED, JSON.stringify(data.banned));
+          if (normalizePublicUrl(data.publicUrl)) localStorage.setItem(KEY_PUBLIC_URL, normalizePublicUrl(data.publicUrl));
           if (data.messages && typeof data.messages === "object") localStorage.setItem(LEGACY_MSG_KEY, JSON.stringify(data.messages));
           if (peer) { try { peer.destroy(); } catch (e) {} }
           window.location.href = currentPageUrlWithoutParams();
@@ -3341,5 +3449,5 @@
       initApp();
     })();
   </script>
-<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a4b5dfec78c7f533',t:'MTc5MjE0MTI0Mg=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+</body>
 </html>
